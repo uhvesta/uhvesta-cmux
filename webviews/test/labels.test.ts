@@ -32,4 +32,21 @@ describe("createDiffViewerLabelResolver", () => {
 
     expect(label("hideFiles")).toBe("Hide files");
   });
+
+  test("new review surfaces are part of the required native payload contract", () => {
+    const label = createDiffViewerLabelResolver({
+      copiedReviewPrompt: "Copied",
+      copyReviewPrompt: "Copy",
+      fullFile: "Full File",
+      queuedReviewPrompt: "Queued",
+      repository: "Repository",
+      sendReviewPrompt: "Send",
+      sendReviewPromptFailed: "Failed",
+      switchToFullFile: "Full",
+    }, { assertMissing: true });
+
+    expect(label("fullFile")).toBe("Full File");
+    expect(label("repository")).toBe("Repository");
+    expect(label("sendReviewPrompt")).toBe("Send");
+  });
 });

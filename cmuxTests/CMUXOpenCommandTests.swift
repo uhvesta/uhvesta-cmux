@@ -718,6 +718,286 @@ final class CMUXOpenCommandTests: XCTestCase {
         XCTAssertTrue(result.stdout.contains("--base <ref>"), result.stdout)
     }
 
+    func testReviewCompanionEmitsLeafRepositoryManifest() throws {
+        let cliPath = try bundledCLIPath()
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let clientURL = rootURL.appendingPathComponent("client", isDirectory: true)
+        let serverURL = rootURL.appendingPathComponent("services/server", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+
+        for repositoryURL in [clientURL, serverURL] {
+            try FileManager.default.createDirectory(at: repositoryURL, withIntermediateDirectories: true)
+            try runGit(["init"], in: repositoryURL)
+            try runGit(["config", "user.name", "cmux tests"], in: repositoryURL)
+            try runGit(["config", "user.email", "cmux@example.invalid"], in: repositoryURL)
+            let fileURL = repositoryURL.appendingPathComponent("tracked.txt")
+            try "before\n".write(to: fileURL, atomically: true, encoding: .utf8)
+            try runGit(["add", "tracked.txt"], in: repositoryURL)
+            try runGit(["commit", "-m", "initial"], in: repositoryURL)
+            try "before\nafter\n".write(to: fileURL, atomically: true, encoding: .utf8)
+        }
+
+        // A repository nested in `client` must not become a third aggregate entry.
+        let nestedURL = clientURL.appendingPathComponent("nested-repository", isDirectory: true)
+        try FileManager.default.createDirectory(at: nestedURL, withIntermediateDirectories: true)
+        try runGit(["init"], in: nestedURL)
+
+        let result = runCLI(
+            cliPath: cliPath,
+            socketPath: makeSocketPath("review-companion"),
+            arguments: ["review-companion", "--root", rootURL.path, "--source", "unstaged"]
+        )
+
+        XCTAssertFalse(result.timedOut, result.stderr)
+        XCTAssertEqual(result.status, 0, result.stderr)
+        let data = try XCTUnwrap(result.stdout.data(using: .utf8))
+        let manifest = try XCTUnwrap(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        XCTAssertEqual(manifest["schemaVersion"] as? Int, 1)
+        let repositories = try XCTUnwrap(manifest["repositories"] as? [[String: Any]])
+        XCTAssertEqual(repositories.map { $0["id"] as? String }, ["client", "services/server"])
+        let patches = repositories.compactMap { $0["patch"] as? String }
+        XCTAssertTrue(patches.contains(where: { $0.contains("a/client/tracked.txt") }))
+        XCTAssertTrue(patches.contains(where: { $0.contains("a/services/server/tracked.txt") }))
+    }
+
+    func testRemoteReviewCompanionUsesNoTTYAndShellSafeArguments() throws {
+        let cliPath = try bundledCLIPath()
+        let fixtureURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cmux-review-ssh-\(UUID().uuidString)", isDirectory: true)
+        let companionDirectoryURL = fixtureURL.appendingPathComponent("companion's tools", isDirectory: true)
+        let fakeSSHURL = fixtureURL.appendingPathComponent("fake-ssh", isDirectory: false)
+        let companionURL = companionDirectoryURL.appendingPathComponent("cmux review", isDirectory: false)
+        let manifestURL = fixtureURL.appendingPathComponent("manifest.json", isDirectory: false)
+        let sshArgumentsURL = fixtureURL.appendingPathComponent("ssh-arguments.txt", isDirectory: false)
+        let companionArgumentsURL = fixtureURL.appendingPathComponent("companion-arguments.txt", isDirectory: false)
+        let hostileRoot = "/srv/review root's files; touch SHOULD_NOT_EXIST"
+        let hostileBase = "feature/quote'branch; touch SHOULD_NOT_EXIST"
+        defer { try? FileManager.default.removeItem(at: fixtureURL) }
+
+        try FileManager.default.createDirectory(at: companionDirectoryURL, withIntermediateDirectories: true)
+        let manifest: [String: Any] = [
+            "schemaVersion": 1,
+            "root": hostileRoot,
+            "source": "branch",
+            "repositories": [[
+                "id": "repo with spaces",
+                "root": hostileRoot + "/repo with spaces",
+                "label": "repo with spaces",
+                "baseRef": hostileBase,
+                "patch": "diff --git a/repo with spaces/tracked.txt b/repo with spaces/tracked.txt\n--- a/repo with spaces/tracked.txt\n+++ b/repo with spaces/tracked.txt\n@@ -1 +1 @@\n-before\n+after\n",
+            ]],
+        ]
+        try JSONSerialization.data(withJSONObject: manifest, options: [.sortedKeys])
+            .write(to: manifestURL, options: .atomic)
+        try """
+        #!/bin/sh
+        printf '%s\\n' "$@" > "$CMUX_TEST_REVIEW_COMPANION_ARGUMENTS"
+        cat "$CMUX_TEST_REVIEW_MANIFEST"
+        """.write(to: companionURL, atomically: true, encoding: .utf8)
+        try """
+        #!/bin/sh
+        printf '%s\\n' "$@" > "$CMUX_TEST_REVIEW_SSH_ARGUMENTS"
+        for cmux_review_ssh_arg in "$@"; do :; done
+        /bin/sh -c "$cmux_review_ssh_arg"
+        """.write(to: fakeSSHURL, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: companionURL.path)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: fakeSSHURL.path)
+
+        let result = try runDiffCLIAndReadHTML(
+            cliPath: cliPath,
+            arguments: [
+                "diff", "--ssh", "review@example.invalid", "--remote-path", hostileRoot,
+                "--remote-cmux", companionURL.path, "--branch", "--base", hostileBase,
+                "--layout", "full",
+            ],
+            environmentOverrides: [
+                "CMUX_REVIEW_SSH_EXECUTABLE": fakeSSHURL.path,
+                "CMUX_TEST_REVIEW_SSH_ARGUMENTS": sshArgumentsURL.path,
+                "CMUX_TEST_REVIEW_COMPANION_ARGUMENTS": companionArgumentsURL.path,
+                "CMUX_TEST_REVIEW_MANIFEST": manifestURL.path,
+            ]
+        )
+
+        let sshArguments = try String(contentsOf: sshArgumentsURL, encoding: .utf8)
+            .split(whereSeparator: \.isNewline)
+            .map(String.init)
+        XCTAssertEqual(Array(sshArguments.prefix(4)), ["-o", "RemoteCommand=none", "-T", "--"])
+        XCTAssertEqual(sshArguments.dropFirst(4).first, "review@example.invalid")
+        XCTAssertEqual(sshArguments.filter { $0 == "-L" || $0 == "-R" || $0 == "-D" }, [])
+
+        let companionArguments = try String(contentsOf: companionArgumentsURL, encoding: .utf8)
+            .split(whereSeparator: \.isNewline)
+            .map(String.init)
+        XCTAssertEqual(companionArguments, [
+            "review-companion", "--root", hostileRoot, "--source", "branch", "--base", hostileBase,
+        ])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: fixtureURL.appendingPathComponent("SHOULD_NOT_EXIST").path))
+
+        let payload = try diffViewerPayload(from: result.html)
+        XCTAssertEqual(payload["layout"] as? String, "full")
+        let returnedManifest = try XCTUnwrap(payload["aggregateManifest"] as? [String: Any])
+        XCTAssertEqual(returnedManifest["root"] as? String, hostileRoot)
+        XCTAssertEqual(returnedManifest["source"] as? String, "branch")
+        let repositories = try XCTUnwrap(returnedManifest["repositories"] as? [[String: Any]])
+        XCTAssertEqual(repositories.first?["baseRef"] as? String, hostileBase)
+        XCTAssertTrue(result.patch.contains("+after"))
+    }
+
+    func testRemoteReviewCompanionReportsProtocolAndAvailabilityFailuresBeforeOpeningViewer() throws {
+        let cliPath = try bundledCLIPath()
+        let fixtureURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cmux-review-ssh-errors-\(UUID().uuidString)", isDirectory: true)
+        let invalidProtocolSSHURL = fixtureURL.appendingPathComponent("invalid-protocol-ssh", isDirectory: false)
+        let missingCompanionSSHURL = fixtureURL.appendingPathComponent("missing-companion-ssh", isDirectory: false)
+        defer { try? FileManager.default.removeItem(at: fixtureURL) }
+
+        try FileManager.default.createDirectory(at: fixtureURL, withIntermediateDirectories: true)
+        try "#!/bin/sh\\nprintf '%s' '{\"schemaVersion\":999,\"root\":\"/srv/repo\",\"source\":\"unstaged\",\"repositories\":[]}'\\n"
+            .write(to: invalidProtocolSSHURL, atomically: true, encoding: .utf8)
+        try "#!/bin/sh\\nprintf '%s\\n' 'cmux: command not found' >&2\\nexit 127\\n"
+            .write(to: missingCompanionSSHURL, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: invalidProtocolSSHURL.path)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: missingCompanionSSHURL.path)
+
+        let invalidProtocol = runDiffCLIExpectingNoOpen(
+            cliPath: cliPath,
+            arguments: ["diff", "--ssh", "review@example.invalid:/srv/repo"],
+            environmentOverrides: ["CMUX_REVIEW_SSH_EXECUTABLE": invalidProtocolSSHURL.path]
+        )
+        XCTAssertNotEqual(invalidProtocol.status, 0)
+        XCTAssertTrue(invalidProtocol.stderr.contains("protocol version 999 is unsupported"), invalidProtocol.stderr)
+        XCTAssertTrue(invalidProtocol.stderr.contains("Update cmux on review@example.invalid"), invalidProtocol.stderr)
+
+        let missingCompanion = runDiffCLIExpectingNoOpen(
+            cliPath: cliPath,
+            arguments: ["diff", "--ssh", "review@example.invalid:/srv/repo"],
+            environmentOverrides: ["CMUX_REVIEW_SSH_EXECUTABLE": missingCompanionSSHURL.path]
+        )
+        XCTAssertNotEqual(missingCompanion.status, 0)
+        XCTAssertTrue(missingCompanion.stderr.contains("does not have a compatible 'cmux review-companion'"), missingCompanion.stderr)
+    }
+
+    func testRemoteReviewRejectsDashPrefixedSSHDestinationBeforeLaunchingSSH() throws {
+        let cliPath = try bundledCLIPath()
+        let result = runDiffCLIExpectingNoOpen(
+            cliPath: cliPath,
+            arguments: ["diff", "--ssh=-V:/srv/repo"]
+        )
+
+        XCTAssertNotEqual(result.status, 0)
+        XCTAssertTrue(result.stderr.contains("SSH review destinations may not begin with '-'"), result.stderr)
+    }
+
+    func testAggregateDiffPublishesManifestForViewerGrouping() throws {
+        let cliPath = try bundledCLIPath()
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let firstRepositoryURL = rootURL.appendingPathComponent("first", isDirectory: true)
+        let secondRepositoryURL = rootURL.appendingPathComponent("second", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+
+        for repositoryURL in [firstRepositoryURL, secondRepositoryURL] {
+            try FileManager.default.createDirectory(at: repositoryURL, withIntermediateDirectories: true)
+            try runGit(["init"], in: repositoryURL)
+            try runGit(["config", "user.name", "cmux tests"], in: repositoryURL)
+            try runGit(["config", "user.email", "cmux@example.invalid"], in: repositoryURL)
+            let fileURL = repositoryURL.appendingPathComponent("tracked.txt")
+            try "before\n".write(to: fileURL, atomically: true, encoding: .utf8)
+            try runGit(["add", "tracked.txt"], in: repositoryURL)
+            try runGit(["commit", "-m", "initial"], in: repositoryURL)
+            try "before\nafter\n".write(to: fileURL, atomically: true, encoding: .utf8)
+        }
+
+        let result = try runDiffCLIAndReadHTML(
+            cliPath: cliPath,
+            arguments: ["diff", "--aggregate", "--cwd", rootURL.path],
+            currentDirectoryURL: rootURL
+        )
+        let payload = try diffViewerPayload(from: result.html)
+        let manifest = try XCTUnwrap(payload["aggregateManifest"] as? [String: Any])
+        XCTAssertEqual(manifest["root"] as? String, rootURL.path)
+        let repositories = try XCTUnwrap(manifest["repositories"] as? [[String: Any]])
+        XCTAssertEqual(repositories.map { $0["id"] as? String }, ["first", "second"])
+        XCTAssertTrue(result.patch.contains("a/first/tracked.txt"))
+        XCTAssertTrue(result.patch.contains("a/second/tracked.txt"))
+    }
+
+    func testGitGeneratedReviewPatchesCarryCompleteFileContext() throws {
+        let cliPath = try bundledCLIPath()
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let repositoryURL = rootURL.appendingPathComponent("review-repository", isDirectory: true)
+        let fileURL = repositoryURL.appendingPathComponent("large.txt")
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+
+        try FileManager.default.createDirectory(at: repositoryURL, withIntermediateDirectories: true)
+        try runGit(["init"], in: repositoryURL)
+        try runGit(["config", "user.name", "cmux tests"], in: repositoryURL)
+        try runGit(["config", "user.email", "cmux@example.invalid"], in: repositoryURL)
+        let originalLines = (1...500).map { String(format: "line-%03d", $0) }
+        try (originalLines.joined(separator: "\n") + "\n").write(to: fileURL, atomically: true, encoding: .utf8)
+        try runGit(["add", "large.txt"], in: repositoryURL)
+        try runGit(["commit", "-m", "initial"], in: repositoryURL)
+
+        var changedLines = originalLines
+        changedLines[1] = "changed-first"
+        changedLines[249] = "changed-middle"
+        changedLines[498] = "changed-last"
+        try (changedLines.joined(separator: "\n") + "\n").write(to: fileURL, atomically: true, encoding: .utf8)
+
+        let local = try runDiffCLIAndReadHTML(
+            cliPath: cliPath,
+            arguments: ["diff", "--unstaged", "--cwd", repositoryURL.path, "--layout", "full"],
+            currentDirectoryURL: repositoryURL
+        )
+        let aggregate = try runDiffCLIAndReadHTML(
+            cliPath: cliPath,
+            arguments: ["diff", "--aggregate", "--cwd", rootURL.path, "--layout", "full"],
+            currentDirectoryURL: rootURL
+        )
+        XCTAssertEqual(try diffViewerPayload(from: local.html)["layout"] as? String, "full")
+        XCTAssertEqual(try diffViewerPayload(from: aggregate.html)["layout"] as? String, "full")
+        let homeURL = rootURL.appendingPathComponent("home", isDirectory: true)
+        let settingsURL = homeURL
+            .appendingPathComponent(".config/cmux", isDirectory: true)
+            .appendingPathComponent("cmux.json", isDirectory: false)
+        try FileManager.default.createDirectory(at: settingsURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try "{\"diffViewer\":{\"defaultLayout\":\"full\"}}".write(to: settingsURL, atomically: true, encoding: .utf8)
+        let settingsDefault = try runDiffCLIAndReadHTML(
+            cliPath: cliPath,
+            arguments: ["diff", "--unstaged", "--cwd", repositoryURL.path],
+            environmentOverrides: ["HOME": homeURL.path, "CFFIXED_USER_HOME": homeURL.path],
+            currentDirectoryURL: repositoryURL
+        )
+        let settingsPayload = try diffViewerPayload(from: settingsDefault.html)
+        XCTAssertEqual(settingsPayload["layout"] as? String, "full")
+        XCTAssertEqual(settingsPayload["layoutSource"] as? String, "default")
+        let companion = runCLI(
+            cliPath: cliPath,
+            socketPath: makeSocketPath("full-context-companion"),
+            arguments: ["review-companion", "--root", rootURL.path, "--source", "unstaged"]
+        )
+        XCTAssertFalse(companion.timedOut, companion.stderr)
+        XCTAssertEqual(companion.status, 0, companion.stderr)
+        let companionData = try XCTUnwrap(companion.stdout.data(using: .utf8))
+        let companionManifest = try XCTUnwrap(try JSONSerialization.jsonObject(with: companionData) as? [String: Any])
+        let companionRepositories = try XCTUnwrap(companionManifest["repositories"] as? [[String: Any]])
+        let companionPatch = try XCTUnwrap(companionRepositories.first?["patch"] as? String)
+
+        for (source, patch) in [("local", local.patch), ("aggregate", aggregate.patch), ("companion", companionPatch)] {
+            XCTAssertTrue(patch.contains(" line-001\n"), "\(source) patch omitted first unchanged line")
+            XCTAssertTrue(patch.contains(" line-251\n"), "\(source) patch omitted middle unchanged line")
+            XCTAssertTrue(patch.contains(" line-500"), "\(source) patch omitted last unchanged line")
+            XCTAssertTrue(patch.contains("-line-002\n"), "\(source) patch omitted the first removal")
+            XCTAssertTrue(patch.contains("-line-250\n"), "\(source) patch omitted the middle removal")
+            XCTAssertTrue(patch.contains("-line-499\n"), "\(source) patch omitted the last removal")
+            XCTAssertTrue(patch.contains("+changed-first\n"), "\(source) patch changed the first edit")
+            XCTAssertTrue(patch.contains("+changed-middle\n"), "\(source) patch changed the middle edit")
+            XCTAssertTrue(patch.contains("+changed-last\n"), "\(source) patch changed the last edit")
+        }
+    }
+
     func testDiffCommandKeepsRequestedGitSourceAndLoadsAlternativesOnDemand() throws {
         let cliPath = try bundledCLIPath()
         let rootURL = FileManager.default.temporaryDirectory

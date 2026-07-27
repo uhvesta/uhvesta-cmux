@@ -43,6 +43,25 @@ final class TaskManagerResourcesTests: XCTestCase {
         XCTAssertEqual(definition.assetName, "AgentIcons/Antigravity")
     }
 
+    func testCopilotCodingAgentDefinitionRecognizesDirectAndLaunchKindInvocations() throws {
+        let direct = try XCTUnwrap(CmuxTaskManagerCodingAgentDefinition.matchingDefinition(
+            processName: "copilot-cli",
+            processPath: "/opt/homebrew/bin/copilot-cli",
+            arguments: ["/opt/homebrew/bin/copilot-cli", "--acp"],
+            environment: [:]
+        ))
+        XCTAssertEqual(direct.id, "copilot")
+        XCTAssertEqual(direct.displayName, String(localized: "taskManager.agent.copilot", defaultValue: "GitHub Copilot"))
+
+        let launchedViaWrapper = try XCTUnwrap(CmuxTaskManagerCodingAgentDefinition.matchingDefinition(
+            processName: "zsh",
+            processPath: "/bin/zsh",
+            arguments: ["/bin/zsh", "-lc", "exec copilot --acp"],
+            environment: ["CMUX_AGENT_LAUNCH_KIND": "github-copilot"]
+        ))
+        XCTAssertEqual(launchedViaWrapper.id, "copilot")
+    }
+
 
     func testAttributedPayloadProratesSharedResourceMeasurements() {
         let summary = resourceSummary()

@@ -125,6 +125,69 @@ test("programmatic jumps can reset a pending smooth target", () => {
   expect(tops).toEqual([72, 1_072]);
 });
 
+test("rendered-row navigation walks Pierre shadow rows without materializing offscreen lines", () => {
+  dom = new JSDOM("<!doctype html><html><body><div id='viewer'><div id='host'></div></div></body></html>");
+  const viewer = dom.window.document.getElementById("viewer") as HTMLElement;
+  const host = dom.window.document.getElementById("host") as HTMLElement;
+  const root = host.attachShadow({ mode: "open" });
+  root.innerHTML = "<div data-line='10'></div><div data-line='11'></div><div data-line='12'></div>";
+  const rows = Array.from(root.querySelectorAll<HTMLElement>("[data-line]"));
+  rows.forEach((row, index) => {
+    row.getBoundingClientRect = () => ({ top: index * 20, bottom: index * 20 + 18, width: 120, height: 18 }) as DOMRect;
+  });
+  viewer.getBoundingClientRect = () => ({ top: 0, bottom: 80, width: 500, height: 80 }) as DOMRect;
+  Object.defineProperty(viewer, "scrollTop", { value: 0, writable: true });
+  const calls: ScrollToOptions[] = [];
+  viewer.scrollTo = ((options: ScrollToOptions) => { calls.push(options); }) as typeof viewer.scrollTo;
+
+  expect(CmuxViewerNavigation.moveRenderedRow!(viewer, 1)).toEqual({ lineNumber: 11, side: "additions" });
+  expect(calls).toEqual([{ top: 8, behavior: "smooth" }]);
+});
+
+test("rendered-row navigation resolves the newly materialized row at a Pierre window boundary", () => {
+  dom = new JSDOM("<!doctype html><html><body><div id='viewer'><div id='host'></div></div></body></html>");
+  const viewer = dom.window.document.getElementById("viewer") as HTMLElement;
+  const host = dom.window.document.getElementById("host") as HTMLElement;
+  host.dataset.cmuxReviewItemId = "file-a";
+  const root = host.attachShadow({ mode: "open" });
+  const selected: unknown[] = [];
+  viewer.addEventListener("cmux-diff-viewer-rendered-row-selected", (event) => {
+    selected.push((event as CustomEvent).detail);
+  });
+  const renderWindow = (lineNumbers: number[]) => {
+    root.innerHTML = lineNumbers.map((lineNumber) => `<div data-line='${lineNumber}'></div>`).join("");
+    Array.from(root.querySelectorAll<HTMLElement>("[data-line]")).forEach((row, index) => {
+      row.getBoundingClientRect = () => ({ top: index * 20, bottom: index * 20 + 18, width: 120, height: 18 }) as DOMRect;
+    });
+  };
+  renderWindow([10, 11, 12]);
+  viewer.getBoundingClientRect = () => ({ top: 0, bottom: 80, width: 500, height: 80 }) as DOMRect;
+  Object.defineProperties(viewer, {
+    clientHeight: { value: 80 },
+    scrollHeight: { value: 400 },
+    scrollTop: { value: 0, writable: true },
+  });
+  viewer.scrollTo = ((options: ScrollToOptions) => {
+    viewer.scrollTop = Number(options.top);
+    if (viewer.scrollTop >= 50) {
+      renderWindow([11, 12, 13]);
+    }
+  }) as typeof viewer.scrollTo;
+
+  expect(CmuxViewerNavigation.moveRenderedRow!(viewer, 1)).toMatchObject({ lineNumber: 11 });
+  expect(CmuxViewerNavigation.moveRenderedRow!(viewer, 1)).toMatchObject({ lineNumber: 12 });
+  expect(CmuxViewerNavigation.moveRenderedRow!(viewer, 1)).toEqual({ pending: true });
+  expect(CmuxViewerNavigation.hasPendingRenderedRowMove!(viewer)).toBe(true);
+  expect(CmuxViewerNavigation.refreshRenderedRows!(viewer)).toBe(true);
+  expect(CmuxViewerNavigation.hasPendingRenderedRowMove!(viewer)).toBe(false);
+  expect(selected).toEqual([
+    { itemId: "file-a", lineNumber: 11, side: "additions" },
+    { itemId: "file-a", lineNumber: 12, side: "additions" },
+    { itemId: "file-a", lineNumber: 13, side: "additions" },
+  ]);
+  expect(root.querySelectorAll("[data-line]")).toHaveLength(3);
+});
+
 function shortcut(key: string, modifiers: Record<string, boolean> = {}) {
   return { first: { key, command: false, control: false, option: false, shift: false, ...modifiers } };
 }

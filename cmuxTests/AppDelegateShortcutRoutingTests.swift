@@ -2165,6 +2165,87 @@ final class AppDelegateShortcutRoutingTests: XCTestCase {
         )
     }
 
+    func testOpenReviewTabEntrypointsUseAggregateBranchDiff() {
+        guard let appDelegate = AppDelegate.shared else {
+            XCTFail("Expected AppDelegate.shared")
+            return
+        }
+
+        let shortcut = StoredShortcut(key: "r", command: true, shift: true, option: false, control: true)
+        XCTAssertEqual(KeyboardShortcutSettings.shortcut(for: .openReviewTab), shortcut)
+        XCTAssertEqual(
+            KeyboardShortcutSettings.Action.openReviewTab.normalizedRecordedShortcutResult(shortcut),
+            .accepted(shortcut),
+            "The aggregate-review shortcut must not collide with existing defaults"
+        )
+        XCTAssertTrue(KeyboardShortcutSettings.settingsVisibleActions.contains(.openReviewTab))
+
+        let windowId = appDelegate.createMainWindow()
+        defer { closeWindow(withId: windowId) }
+        guard let targetWindow = window(withId: windowId) else {
+            XCTFail("Expected test window")
+            return
+        }
+
+        var launches: [[String]] = []
+        appDelegate.debugLaunchDiffViewerProcessHandler = { launches.append($0) }
+        defer { appDelegate.debugLaunchDiffViewerProcessHandler = nil }
+
+        guard let event = makeKeyDownEvent(
+            key: "r",
+            modifiers: [.command, .control, .shift],
+            keyCode: 15, // kVK_ANSI_R
+            windowNumber: targetWindow.windowNumber
+        ) else {
+            XCTFail("Failed to construct Cmd+Ctrl+Shift+R event")
+            return
+        }
+
+#if DEBUG
+        XCTAssertTrue(appDelegate.debugHandleCustomShortcut(event: event))
+#else
+        XCTFail("debugHandleCustomShortcut is only available in DEBUG")
+#endif
+
+        guard let context = appDelegate.contextForMainTerminalWindow(targetWindow) else {
+            XCTFail("Expected a registered main-window context")
+            return
+        }
+        XCTAssertTrue(
+            appDelegate.executeConfiguredCmuxAction(
+                .builtIn(.newReviewTab),
+                context: context
+            ),
+            "The built-in tab-bar action must use the same review-open path as the shortcut"
+        )
+
+        XCTAssertEqual(launches.count, 2)
+        for arguments in launches {
+            XCTAssertTrue(arguments.contains("--aggregate"))
+            XCTAssertTrue(arguments.contains("--branch"))
+            XCTAssertFalse(arguments.contains("--unstaged"))
+            XCTAssertFalse(arguments.contains("--last-turn"))
+        }
+    }
+
+    func testDiffViewerHunkAndCommentActionsUseBareReviewPanelBindings() {
+        let expected: [(KeyboardShortcutSettings.Action, String)] = [
+            (.diffViewerPreviousHunk, "h"),
+            (.diffViewerNextHunk, "l"),
+            (.diffViewerComment, "c"),
+        ]
+
+        for (action, key) in expected {
+            XCTAssertEqual(
+                KeyboardShortcutSettings.shortcut(for: action),
+                StoredShortcut(key: key, command: false, shift: false, option: false, control: false)
+            )
+            XCTAssertTrue(action.allowsBareFirstStroke)
+            XCTAssertTrue(action.isBrowserContentShortcut)
+            XCTAssertEqual(action.shortcutContext, .browserPanel)
+        }
+    }
+
     func testCmdCtrlWPromptsBeforeClosingWindow() {
         guard let appDelegate = AppDelegate.shared else {
             XCTFail("Expected AppDelegate.shared")

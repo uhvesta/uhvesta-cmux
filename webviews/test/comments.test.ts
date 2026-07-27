@@ -107,9 +107,12 @@ test("commentDisplayName collapses single-line ranges", () => {
 
 test("commentSubmissionText formats the submission text", () => {
   expect(commentSubmissionText(comment(), fileDiff)).toBe(
-    "Review comment on src/example.ts lines 10-11 (new version):\n\n" +
-      "10: const a = 1;\n11: const b = 2;\n\n" +
-      "rename this\n",
+    "## Review feedback\n\n" +
+      "**File:** `src/example.ts`\n" +
+      "**Location:** new lines 10-11\n\n" +
+      "**Selected source**\n\n" +
+      "```text\n10: const a = 1;\n11: const b = 2;\n```\n\n" +
+      "**Review comment**\n\n> rename this\n",
   );
 });
 
@@ -118,7 +121,7 @@ test("commentSubmissionText marks deletion-side comments as old version", () => 
     comment({ side: "deletions", startLine: 28, endLine: 28, lineText: "yield a;" }),
     fileDiff,
   );
-  expect(submissionText).toContain("line 28 (old version)");
+  expect(submissionText).toContain("**Location:** old line 28");
   expect(submissionText).toContain("28: yield a;");
 });
 
@@ -171,6 +174,19 @@ test("sidebarCommentEntries marks unmatched comments pending while streaming", (
 
   const complete = sidebarCommentEntries([], [comment()], true);
   expect(complete[0]).toMatchObject({ itemId: null, pending: false, anchor: { state: "outdated" } });
+});
+
+test("read-only /ask answers are presentation children, not new inline feedback", () => {
+  const question = comment({ id: "question", message: "/ask Why is this branch needed?" });
+  const answer = comment({
+    id: "answer",
+    parentId: "question",
+    readOnly: true,
+    author: "GitHub Copilot",
+    message: "It keeps the source compatibility path intact.",
+  });
+  expect(annotationsForItem(item(), [question, answer], null)).toHaveLength(1);
+  expect(sidebarCommentEntries([item()], [question, answer])).toHaveLength(1);
 });
 
 test("resolveCommentLabels prefers payload labels and falls back to English", () => {

@@ -1,6 +1,6 @@
 import { afterEach, expect, test } from "bun:test";
 import { JSDOM } from "jsdom";
-import { copyGitApplyCommand, resolveDiffNavigationURL } from "../src/actions";
+import { copyGitApplyCommand, copyReviewPrompt, resolveDiffNavigationURL } from "../src/actions";
 import { createDiffViewerLabelResolver } from "../src/labels";
 
 const originalGlobals = new Map<string, any>();
@@ -75,6 +75,25 @@ test("copyGitApplyCommand fails when the textarea fallback cannot copy", async (
   const label = createDiffViewerLabelResolver(undefined);
 
   await expect(copyGitApplyCommand("/patch.diff", label, textarea)).rejects.toThrow("Clipboard copy failed");
+});
+
+test("copyReviewPrompt uses the same WebKit-safe textarea fallback", async () => {
+  const dom = new JSDOM("<!doctype html><html><body><textarea></textarea></body></html>");
+  const textarea = dom.window.document.querySelector("textarea");
+  expect(textarea).toBeTruthy();
+  (globalThis as any).navigator = {};
+  (globalThis as any).document = dom.window.document;
+  let copied = false;
+  dom.window.document.execCommand = (command: string) => {
+    copied = command === "copy";
+    return copied;
+  };
+
+  const message = await copyReviewPrompt("# Review feedback\n", createDiffViewerLabelResolver(undefined), textarea);
+
+  expect(message).toBe("Copied review prompt");
+  expect(textarea?.value).toBe("# Review feedback\n");
+  expect(copied).toBe(true);
 });
 
 test("resolveDiffNavigationURL strips query and fragment for custom scheme rewrites", () => {
