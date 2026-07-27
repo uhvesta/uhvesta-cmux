@@ -40,6 +40,8 @@ export type AnchorResult =
   | { state: "outdated" };
 
 export type CommentDraft = {
+  /** Stable across repeated submit gestures for the same open composer. */
+  id?: string;
   itemId: string;
   side: DiffCommentSide;
   startLine: number;

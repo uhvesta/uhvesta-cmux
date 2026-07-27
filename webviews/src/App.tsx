@@ -552,6 +552,7 @@ export function App({ config, initialStatus }: ConfigProps) {
     dispatch({
       type: "set-draft",
       draft: {
+        id: crypto.randomUUID(),
         itemId: item.id,
         side: cursor.side,
         startLine: cursor.lineNumber,
@@ -785,6 +786,7 @@ function useDiffComments({
     dispatch({
       type: "set-draft",
       draft: {
+        id: crypto.randomUUID(),
         itemId: context.item.id,
         side,
         startLine: Math.min(range.start, range.end),
@@ -848,6 +850,7 @@ function useDiffComments({
     const repoRoot = item.commentRepoRoot ?? repoRoots[0];
     if (repoRoot == null) return;
     const input = {
+      id: draft.id ?? crypto.randomUUID(),
       filePath: commentFilePath(item),
       // Never infer an aggregate repository from a path: sibling repositories
       // routinely both contain paths such as src/index.ts.
