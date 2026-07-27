@@ -10,6 +10,69 @@ import XCTest
 
 @MainActor
 final class DiffCommentStoreTests: XCTestCase {
+    func testLegacySubmissionTextIsReducedToSelectedLines() {
+        let comment = DiffComment(
+            id: UUID(),
+            filePath: "vendor/difit/src/server/server.ts",
+            side: "additions",
+            startLine: 124,
+            endLine: 129,
+            endSide: nil,
+            lineText: "}",
+            message: "dislike this",
+            submissionText: """
+            ## Review feedback
+
+            **File:** `vendor/difit/src/server/server.ts`
+            **Location:** new lines 124-129
+
+            **Diff context**
+
+            ```diff
+            @@ -120,4 +120,12 @@
+             unchanged
+            +export interface DiffApp {
+            +  app: Express;
+            +  fileWatcher: FileWatcherService;
+            +  invalidateCache: () => void;
+            +  outputFinalComments: () => void;
+            +}
+            ```
+
+            **Review comment**
+
+            > dislike this
+            """,
+            consumedAt: nil,
+            createdAt: Date(),
+            updatedAt: Date()
+        )
+
+        XCTAssertEqual(
+            comment.focusedSubmissionText,
+            """
+            **File:** `vendor/difit/src/server/server.ts`
+            **Location:** new lines 124-129
+
+            **Selected code**
+
+            ```text
+            export interface DiffApp {
+              app: Express;
+              fileWatcher: FileWatcherService;
+              invalidateCache: () => void;
+              outputFinalComments: () => void;
+            }
+            ```
+
+            **Review comment**
+
+            > dislike this
+
+            """
+        )
+    }
+
     private struct LegacyCommentsFile: Codable {
         let repoRoot: String
         let comments: [DiffComment]
