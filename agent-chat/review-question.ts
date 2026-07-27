@@ -6,6 +6,7 @@ const MAX_QUESTION_CHARS = 20_000;
 export type ReviewQuestionKind = "question" | "review";
 
 export interface ReviewQuestionRequest {
+  requestId: string;
   repoRoot: string;
   reviewPrompt: string;
   question?: string;
@@ -13,6 +14,7 @@ export interface ReviewQuestionRequest {
 }
 
 export interface NormalizedReviewQuestionRequest {
+  requestId: string;
   repoRoot: string;
   reviewPrompt: string;
   question?: string;
@@ -67,6 +69,7 @@ export function normalizeReviewQuestionRequest(input: unknown): NormalizedReview
     throw new Error("review question payload must be an object");
   }
   const raw = input as Record<string, unknown>;
+  const requestId = stringValue(raw.requestId, "requestId");
   const repoRoot = stringValue(raw.repoRoot, "repoRoot");
   const reviewPrompt = stringValue(raw.reviewPrompt, "reviewPrompt");
   const question = optionalStringValue(raw.question, "question");
@@ -78,6 +81,7 @@ export function normalizeReviewQuestionRequest(input: unknown): NormalizedReview
     throw new Error(`question exceeds ${MAX_QUESTION_CHARS} characters`);
   }
   return {
+    requestId,
     repoRoot,
     reviewPrompt,
     question,

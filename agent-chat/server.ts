@@ -219,7 +219,10 @@ function restoreReviewQuestionState() {
     if (parsed.version !== 1 || !parsed.questions || typeof parsed.questions !== "object") return;
     for (const [id, checkpoint] of Object.entries(parsed.questions)) {
       if (!checkpoint || checkpoint.result?.id !== id || checkpoint.result.sessionId !== id) continue;
-      const request = normalizeReviewQuestionRequest(checkpoint.request);
+      // Version-one checkpoints predate caller-supplied correlation IDs. The
+      // persisted map key was already the request/session identity, so retain
+      // it while upgrading the normalized request in memory.
+      const request = normalizeReviewQuestionRequest({ ...checkpoint.request, requestId: id });
       const result = checkpoint.result;
       if (result.readOnly !== true || (result.status !== "running" && result.status !== "completed" && result.status !== "failed")) continue;
       reviewQuestionRequests.set(id, request);
@@ -1991,7 +1994,15 @@ function startServer() {
       } catch (err) {
         return Response.json({ error: String(err instanceof Error ? err.message : err) }, { status: 400 });
       }
-      const sess = createSession("copilot", reviewRequest.repoRoot, false, reviewRequest.title);
+      const existing = reviewQuestions.get(reviewRequest.requestId);
+      if (existing) {
+        const session = sessions.get(reviewRequest.requestId);
+        return Response.json({
+          ...existing,
+          ...(session ? { session: sessionSummary(session) } : {}),
+        }, { status: 202 });
+      }
+      const sess = createSession("copilot", reviewRequest.repoRoot, false, reviewRequest.title, {}, reviewRequest.requestId);
       sess.internal.reviewOnly = reviewOnlyCopilotLaunch(reviewRequest.repoRoot);
       reviewQuestions.set(sess.id, createReviewQuestionResult(sess.id, reviewRequest));
       reviewQuestionRequests.set(sess.id, reviewRequest);

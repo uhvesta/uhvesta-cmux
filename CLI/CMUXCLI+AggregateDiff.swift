@@ -231,7 +231,7 @@ extension CMUXCLI {
         guard manifest.schemaVersion == DiffReviewAggregateManifest.schemaVersion else {
             throw CLIError(message: "Remote review companion protocol version \(manifest.schemaVersion) is unsupported (this cmux requires \(DiffReviewAggregateManifest.schemaVersion)). Update cmux on \(target.destination) and retry.")
         }
-        try validateRemoteReviewManifest(manifest, target: target, source: source)
+        try validateRemoteReviewManifest(manifest, target: target, source: source, baseRef: baseRef)
         // The companion intentionally keeps its versioned manifest transport-neutral:
         // `root` values are real paths on the remote host. Before this manifest enters
         // the local viewer, turn each child repository into its durable remote owner.
@@ -332,7 +332,8 @@ extension CMUXCLI {
     private func validateRemoteReviewManifest(
         _ manifest: DiffReviewAggregateManifest,
         target: DiffRemoteReviewTarget,
-        source: DiffSource
+        source: DiffSource,
+        baseRef: String?
     ) throws {
         let expectedRoot = URL(fileURLWithPath: target.root).standardizedFileURL.path
         guard manifest.root == expectedRoot else {
@@ -342,6 +343,7 @@ extension CMUXCLI {
             throw CLIError(message: "Remote review companion returned source '\(manifest.source)' instead of requested source '\(source.slug)'. Update cmux on \(target.destination) and retry.")
         }
 
+        let requestedBaseRef = baseRef?.trimmingCharacters(in: .whitespacesAndNewlines)
         var repositoryIDs = Set<String>()
         let expectedRootPrefix = expectedRoot.hasSuffix("/") ? expectedRoot : expectedRoot + "/"
         for repository in manifest.repositories {
@@ -353,9 +355,14 @@ extension CMUXCLI {
                   repositoryIDs.insert(repository.id).inserted else {
                 throw CLIError(message: "Remote review companion returned invalid repository metadata. Update cmux on \(target.destination) and retry.")
             }
-            if source == .branch,
-               repository.baseRef?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false {
-                throw CLIError(message: "Remote review companion omitted the branch base for \(repository.label). Update cmux on \(target.destination) and retry.")
+            if source == .branch {
+                guard let returnedBaseRef = repository.baseRef?.trimmingCharacters(in: .whitespacesAndNewlines),
+                      !returnedBaseRef.isEmpty else {
+                    throw CLIError(message: "Remote review companion omitted the branch base for \(repository.label). Update cmux on \(target.destination) and retry.")
+                }
+                if let requestedBaseRef, !requestedBaseRef.isEmpty, returnedBaseRef != requestedBaseRef {
+                    throw CLIError(message: "Remote review companion returned branch base '\(returnedBaseRef)' instead of requested '\(requestedBaseRef)' for \(repository.label). Update cmux on \(target.destination) and retry.")
+                }
             }
         }
     }

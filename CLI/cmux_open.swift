@@ -562,6 +562,7 @@ extension CMUXCLI {
                 "collapseAllDiffs": CMUXDiffViewerLocalization.string("diffViewer.collapseAllDiffs", defaultValue: "Collapse all diffs"),
                 "collapseUnchangedContext": CMUXDiffViewerLocalization.string("diffViewer.collapseUnchangedContext", defaultValue: "Collapse unchanged context"),
                 "copyFailedGitApplyCommand": CMUXDiffViewerLocalization.string("diffViewer.copyFailedGitApplyCommand", defaultValue: "Could not copy git apply command."),
+                "copyFailedReviewPrompt": CMUXDiffViewerLocalization.string("diffViewer.copyFailedReviewPrompt", defaultValue: "Could not copy review prompt."),
                 "copiedGitApplyCommand": CMUXDiffViewerLocalization.string("diffViewer.copiedGitApplyCommand", defaultValue: "Copied git apply command"),
                 "copiedReviewPrompt": CMUXDiffViewerLocalization.string("diffViewer.copiedReviewPrompt", defaultValue: "Copied review prompt"),
                 "copyGitApplyCommand": CMUXDiffViewerLocalization.string("diffViewer.copyGitApplyCommand", defaultValue: "Copy git apply command"),
