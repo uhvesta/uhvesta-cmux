@@ -21,6 +21,7 @@ import {
   normalizeReviewQuestionRequest,
   reduceReviewQuestionEvent,
   reviewOnlyCopilotLaunch,
+  type NormalizedReviewQuestionRequest,
   type ReviewQuestionResult,
 } from "./review-question";
 import { pickAccentColor, resolveGhosttyTheme, resolveGhosttyThemeAsync, type GhosttyTheme } from "./theme";
@@ -42,6 +43,11 @@ const AUTH_TOKEN = argValue("--token") ?? process.env.CMUX_AGENT_CHAT_TOKEN ?? "
 if (AUTH_TOKEN.includes("/")) throw new Error("CMUX_AGENT_CHAT_TOKEN must be a single path segment");
 const AUTH_PREFIX = AUTH_TOKEN ? `/${encodeURIComponent(AUTH_TOKEN)}` : "";
 const STATE_FILE = process.env.CMUX_AGENT_CHAT_STATE_FILE ?? "";
+// Unlike the launch-discovery file, this survives an app-owned sidecar
+// restart. It contains only the bounded, one-turn review contract and no
+// bearer token; the replacement sidecar receives a fresh token and resumes
+// only requests that were already accepted.
+const REVIEW_QUESTION_STATE_FILE = process.env.CMUX_AGENT_CHAT_REVIEW_STATE_FILE ?? "";
 
 // The sidecar binds loopback only, but browsers can still reach loopback from
 // arbitrary web origins (CSRF against the WS control plane) and DNS rebinding
@@ -192,7 +198,70 @@ const sessions = new Map<string, Session>();
 // status, streamed deltas, tool activity, errors, and completion fan out over
 // the existing WebSocket/event machinery. This map is the small REST-facing
 // projection consumed by the native review panel.
+interface PersistedReviewQuestion {
+  request: NormalizedReviewQuestionRequest;
+  result: ReviewQuestionResult;
+}
+
+interface ReviewQuestionStateFile {
+  version: 1;
+  questions: Record<string, PersistedReviewQuestion>;
+}
+
 const reviewQuestions = new Map<string, ReviewQuestionResult>();
+const reviewQuestionRequests = new Map<string, NormalizedReviewQuestionRequest>();
+let reviewQuestionStateWrite: Promise<void> = Promise.resolve();
+
+function restoreReviewQuestionState() {
+  if (!REVIEW_QUESTION_STATE_FILE || !existsSync(REVIEW_QUESTION_STATE_FILE)) return;
+  try {
+    const parsed = JSON.parse(readFileSync(REVIEW_QUESTION_STATE_FILE, "utf8")) as ReviewQuestionStateFile;
+    if (parsed.version !== 1 || !parsed.questions || typeof parsed.questions !== "object") return;
+    for (const [id, checkpoint] of Object.entries(parsed.questions)) {
+      if (!checkpoint || checkpoint.result?.id !== id || checkpoint.result.sessionId !== id) continue;
+      const request = normalizeReviewQuestionRequest(checkpoint.request);
+      const result = checkpoint.result;
+      if (result.readOnly !== true || (result.status !== "running" && result.status !== "completed" && result.status !== "failed")) continue;
+      reviewQuestionRequests.set(id, request);
+      reviewQuestions.set(id, result);
+    }
+  } catch (err) {
+    console.warn("[agent-chat] ignoring invalid review question recovery state", err);
+  }
+}
+
+function reviewQuestionStateSnapshot(): ReviewQuestionStateFile {
+  const questions: Record<string, PersistedReviewQuestion> = {};
+  for (const [id, result] of reviewQuestions) {
+    const request = reviewQuestionRequests.get(id);
+    if (request) questions[id] = { request, result };
+  }
+  return { version: 1, questions };
+}
+
+async function persistReviewQuestionState() {
+  if (!REVIEW_QUESTION_STATE_FILE) return;
+  const payload = JSON.stringify(reviewQuestionStateSnapshot());
+  const path = REVIEW_QUESTION_STATE_FILE;
+  reviewQuestionStateWrite = reviewQuestionStateWrite
+    .catch(() => {})
+    .then(async () => {
+      const directory = dirname(path);
+      await mkdir(directory, { recursive: true, mode: 0o700 });
+      const temporary = join(directory, `.${pathBasename(path)}.${process.pid}.${crypto.randomUUID()}.tmp`);
+      await writeFile(temporary, payload, { encoding: "utf8", mode: 0o600 });
+      await rename(temporary, path);
+    });
+  return reviewQuestionStateWrite;
+}
+
+function scheduleReviewQuestionStatePersistence() {
+  void persistReviewQuestionState().catch((err) => {
+    console.error("[agent-chat] failed to persist review question state", err);
+  });
+}
+
+restoreReviewQuestionState();
 const allSockets = new Set<Bun.ServerWebSocket<WsData>>();
 let fileTheme = resolveGhosttyTheme();
 let cmuxThemeOverride: GhosttyTheme | null = null;
@@ -346,10 +415,12 @@ function createSession(
   autoApprove: boolean,
   title: string,
   startOptions: Record<string, OptionValue> = {},
+  requestedID?: string,
 ): Session {
   const adapter = adapters.get(provider);
   if (!adapter) throw new Error(`unknown provider: ${provider}`);
-  const id = crypto.randomUUID().slice(0, 8);
+  const id = requestedID ?? crypto.randomUUID().slice(0, 8);
+  if (sessions.has(id)) throw new Error(`session already exists: ${id}`);
   const sess: Session = {
     id,
     provider,
@@ -408,6 +479,7 @@ function recordReviewQuestionEvent(sess: Session, evt: AgentEvent) {
   const result = reviewQuestions.get(sess.id);
   if (!result) return;
   reviewQuestions.set(sess.id, reduceReviewQuestionEvent(result, evt));
+  scheduleReviewQuestionStatePersistence();
 }
 
 function recordReviewQuestionStatus(sess: Session, status: SessionStatus) {
@@ -419,6 +491,7 @@ function recordReviewQuestionStatus(sess: Session, status: SessionStatus) {
       status: "failed",
       error: result.error ?? `Copilot session ${status}`,
     });
+    scheduleReviewQuestionStatePersistence();
   }
 }
 
@@ -1797,6 +1870,31 @@ function assetResponse(req: Request, asset: StaticAsset): Response {
   });
 }
 
+async function resumePersistedReviewQuestions() {
+  for (const [id, result] of reviewQuestions) {
+    if (result.status !== "running" || sessions.has(id)) continue;
+    const persistedRequest = reviewQuestionRequests.get(id);
+    if (!persistedRequest) continue;
+    try {
+      await assertCwd(persistedRequest.repoRoot);
+      const request = { ...persistedRequest, repoRoot: await realpath(persistedRequest.repoRoot) };
+      reviewQuestionRequests.set(id, request);
+      reviewQuestions.set(id, { ...result, repoRoot: request.repoRoot, sessionId: id });
+      const sess = createSession("copilot", request.repoRoot, false, request.title, {}, id);
+      sess.internal.reviewOnly = reviewOnlyCopilotLaunch(request.repoRoot);
+      refreshSession(sess);
+      sendPrompt(sess, formatReadOnlyReviewPrompt(request));
+    } catch (err) {
+      reviewQuestions.set(id, {
+        ...result,
+        status: "failed",
+        error: result.error ?? `Unable to resume Copilot review: ${String(err instanceof Error ? err.message : err)}`,
+      });
+    }
+  }
+  await persistReviewQuestionState();
+}
+
 function startServer() {
   const server = Bun.serve<WsData>({
     port: PORT,
@@ -1896,6 +1994,11 @@ function startServer() {
       const sess = createSession("copilot", reviewRequest.repoRoot, false, reviewRequest.title);
       sess.internal.reviewOnly = reviewOnlyCopilotLaunch(reviewRequest.repoRoot);
       reviewQuestions.set(sess.id, createReviewQuestionResult(sess.id, reviewRequest));
+      reviewQuestionRequests.set(sess.id, reviewRequest);
+      // The acceptance response is our durable one-shot boundary. If the
+      // sidecar is terminated immediately afterwards, its replacement can
+      // resume this exact request ID without reusing an endpoint token.
+      await persistReviewQuestionState();
       refreshSession(sess);
       sendPrompt(sess, formatReadOnlyReviewPrompt(reviewRequest));
       return Response.json({
@@ -1908,14 +2011,16 @@ function startServer() {
       const id = reviewQuestionMatch[1]!;
       const result = reviewQuestions.get(id);
       const sess = sessions.get(id);
-      if (!result || !sess) return Response.json({ error: "review question not found" }, { status: 404 });
+      if (!result) return Response.json({ error: "review question not found" }, { status: 404 });
       if (req.method === "GET") {
-        return Response.json({ ...result, session: sessionSummary(sess) });
+        return Response.json({ ...result, ...(sess ? { session: sessionSummary(sess) } : {}) });
       }
       if (req.method === "DELETE") {
-        sess.adapter.dispose(sess);
-        sessions.delete(sess.id);
+        sess?.adapter.dispose(sess);
+        if (sess) sessions.delete(sess.id);
         reviewQuestions.delete(id);
+        reviewQuestionRequests.delete(id);
+        await persistReviewQuestionState();
         broadcastSessions();
         return new Response(null, { status: 204 });
       }
@@ -1979,7 +2084,12 @@ function startServer() {
     agentModelCatalog.refreshIfStale().catch((err) => console.warn(`model catalog refresh failed: ${String(err)}`));
   }, 60_000);
   startThemeWatcher();
-  writeStateFile(server.port).catch((err) => console.error(`failed to write agent-chat state file: ${String(err)}`));
+  // App-owned launch discovery is the readiness boundary. Publish it only
+  // after durable review questions have been recreated, so the native bridge
+  // cannot observe a transient 404 from a freshly started sidecar.
+  resumePersistedReviewQuestions()
+    .catch((err) => console.error("[agent-chat] failed to resume persisted review questions", err))
+    .finally(() => writeStateFile(server.port).catch((err) => console.error(`failed to write agent-chat state file: ${String(err)}`)));
 
   console.log(`cmux-agent-ui listening on http://127.0.0.1:${server.port}`);
 }

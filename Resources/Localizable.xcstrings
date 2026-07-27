@@ -8,6 +8,34 @@
         "ja": { "stringUnit": { "state": "translated", "value": "レビュー用プロンプトをコピーしました" } }
       }
     },
+    "diffViewer.answerFrom": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Answer from {author}" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "{author} からの回答" } }
+      }
+    },
+    "diffViewer.askComment": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Ask Copilot" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "Copilot に質問" } }
+      }
+    },
+    "diffViewer.askImmutable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Review questions cannot be edited. Delete the question and ask again." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "レビューの質問は編集できません。削除してからもう一度質問してください。" } }
+      }
+    },
+    "diffViewer.askUnavailableRemote": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Copilot questions are unavailable for SSH review. Regular comments and review prompts still work." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "SSH レビューでは Copilot への質問は利用できません。通常のコメントとレビュープロンプトは引き続き利用できます。" } }
+      }
+    },
     "diffViewer.copyReviewPrompt": {
       "extractionState": "manual",
       "localizations": {
@@ -191324,6 +191352,27 @@
             "value": "差分ビューア: 次のファイル"
           }
         }
+      }
+    },
+    "shortcut.diffViewerNextHunk.label": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Diff Viewer: Next Hunk" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "差分ビューア: 次のハンク" } }
+      }
+    },
+    "shortcut.diffViewerPreviousHunk.label": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Diff Viewer: Previous Hunk" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "差分ビューア: 前のハンク" } }
+      }
+    },
+    "shortcut.diffViewerComment.label": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Diff Viewer: Add or Edit Comment" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "差分ビューア: コメントを追加または編集" } }
       }
     },
     "shortcut.diffViewerPreviousFile.label": {

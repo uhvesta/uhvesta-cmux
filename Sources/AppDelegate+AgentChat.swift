@@ -341,6 +341,7 @@ extension AppDelegate {
                 "CMUX_AGENT_CHAT_PORT": "0",
                 "CMUX_AGENT_CHAT_STATE_FILE": stateFileURL.path,
                 "CMUX_AGENT_CHAT_LAUNCH_ID": launchId,
+                "CMUX_AGENT_CHAT_REVIEW_STATE_FILE": stateFileStore.reviewQuestionStateFileURL().path,
             ]
         ) else {
             return AgentChatServerAvailability(isReachable: false, browserURL: agentChat.url)

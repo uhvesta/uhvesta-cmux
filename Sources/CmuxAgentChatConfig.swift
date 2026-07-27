@@ -249,6 +249,14 @@ struct AgentChatSidecarStateFileStore: Sendable {
         directoryURL.appendingPathComponent("state-\(launchId).json")
     }
 
+    /// Durable, token-free state for the accepted one-turn review questions.
+    /// The launch discovery file is intentionally per-process and short-lived;
+    /// this separate 0600 file lets a replacement app-owned sidecar resume an
+    /// already accepted request with its original request ID.
+    func reviewQuestionStateFileURL() -> URL {
+        directoryURL.appendingPathComponent("review-questions.json")
+    }
+
     func prepareStateFileURL(launchId: String, launchDate: Date) async -> URL? {
         let stateFileURL = stateFileURL(launchId: launchId)
         let fileSystem = fileSystem

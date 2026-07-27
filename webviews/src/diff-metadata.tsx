@@ -8,6 +8,23 @@ export type CmuxHunkMetadata = {
   cmuxHunkNumber: number;
 };
 
+/**
+ * Keeps Full File context state independent from Pierre's transient hunk
+ * indexes. The ID is semantic and therefore survives a regenerated diff.
+ */
+export function toggleExpandedHunkID(
+  expandedHunkIDs: ReadonlySet<string>,
+  hunkID: string,
+): ReadonlySet<string> {
+  const next = new Set(expandedHunkIDs);
+  if (next.has(hunkID)) {
+    next.delete(hunkID);
+  } else {
+    next.add(hunkID);
+  }
+  return next;
+}
+
 export function annotateDiffMetadata(fileDiff: any, patchText?: string): void {
   if (fileDiff == null || typeof fileDiff !== "object") {
     return;
@@ -98,7 +115,7 @@ export function DiffHeaderMetadata({
             type="button"
             data-cmux-full-file-hunk={hunkId}
             aria-pressed={expanded}
-            title={label("expandUnchangedContext")}
+            title={expanded ? label("collapseUnchangedContext") : label("expandUnchangedContext")}
             onClick={() => onExpandHunk?.(index, hunkId)}
           >
             {expanded ? `✓ ${hunk.cmuxHunkNumber}` : hunk.cmuxHunkNumber}

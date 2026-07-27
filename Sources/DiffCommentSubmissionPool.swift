@@ -61,15 +61,17 @@ final class DiffCommentSubmissionPool: ObservableObject {
         entriesByWorkspace[workspaceId] = entries
     }
 
-    func removePending(commentId: UUID) {
-        for (workspaceId, entries) in entriesByWorkspace {
-            let remaining = entries.filter { entry in
-                entry.commentId != commentId && !entry.consumptionTargets.contains(where: { $0.commentId == commentId })
-            }
-            if remaining.count != entries.count {
-                entriesByWorkspace[workspaceId] = remaining.isEmpty ? nil : remaining
-            }
+    /// Removes a pending comment only from its owning workspace.
+    ///
+    /// SQLite intentionally permits the same UUID in separate workspace scopes,
+    /// so a UUID alone is not a valid pool identity.
+    func removePending(commentId: UUID, workspaceId: UUID) {
+        guard let entries = entriesByWorkspace[workspaceId] else { return }
+        let remaining = entries.filter { entry in
+            entry.commentId != commentId && !entry.consumptionTargets.contains(where: { $0.commentId == commentId })
         }
+        guard remaining.count != entries.count else { return }
+        entriesByWorkspace[workspaceId] = remaining.isEmpty ? nil : remaining
     }
 
     func pendingCount(workspaceId: UUID?) -> Int {
