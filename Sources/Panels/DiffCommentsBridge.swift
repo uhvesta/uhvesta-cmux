@@ -329,11 +329,28 @@ final class DiffCommentsBridge: NSObject, WKScriptMessageHandlerWithReply {
         question.sidecarRequestID = question.id.uuidString
         question.sidecarSessionID = question.id.uuidString
         let savedQuestion = scopedStore.upsert(question, repoRoot: repoRoot)
+        // Persist the child before the first suspension point. A repeated
+        // click/Cmd-Enter can then observe and return this exact pair instead
+        // of creating a second answer while the first POST is in flight.
+        let placeholderResult = ReviewQuestionSidecarResult(
+            id: savedQuestion.id.uuidString,
+            sessionId: savedQuestion.id.uuidString,
+            repoRoot: DiffCommentStore.canonicalRepoRoot(repoRoot),
+            kind: "review-question",
+            readOnly: true,
+            status: "running",
+            answer: "",
+            error: nil
+        )
+        let pendingAnswer = scopedStore.upsert(
+            pendingAnswer(for: savedQuestion, result: placeholderResult),
+            repoRoot: repoRoot
+        )
         DiffCommentSubmissionPool.shared.removePending(commentId: savedQuestion.id, workspaceId: workspace.id)
 
         let app = AppDelegate.shared
         guard let app else {
-            let failed = markQuestionFailed(savedQuestion, existingAnswer: nil, repoRoot: repoRoot, store: scopedStore)
+            let failed = markQuestionFailed(savedQuestion, existingAnswer: pendingAnswer, repoRoot: repoRoot, store: scopedStore)
             let savedAnswer = failed.answer
             AppDelegate.shared?.postReviewQuestionNotification(
                 workspace: workspace,
@@ -363,8 +380,12 @@ final class DiffCommentsBridge: NSObject, WKScriptMessageHandlerWithReply {
             persistedQuestion.sidecarSessionID = result.sessionId
             persistedQuestion.updatedAt = Date()
             persistedQuestion = scopedStore.upsert(persistedQuestion, repoRoot: repoRoot)
-            let answer = pendingAnswer(for: persistedQuestion, result: result)
-            let savedAnswer = scopedStore.upsert(answer, repoRoot: repoRoot)
+            var savedAnswer = pendingAnswer
+            savedAnswer.requestStatus = result.status
+            savedAnswer.sidecarRequestID = result.id
+            savedAnswer.sidecarSessionID = result.sessionId
+            savedAnswer.updatedAt = Date()
+            savedAnswer = scopedStore.upsert(savedAnswer, repoRoot: repoRoot)
             let taskKey = questionTaskKey(workspace: workspace, commentID: persistedQuestion.id)
             questionTasks[taskKey]?.task.cancel()
             let runID = UUID()
@@ -391,7 +412,7 @@ final class DiffCommentsBridge: NSObject, WKScriptMessageHandlerWithReply {
             )
             return ["question": Self.commentJSON(persistedQuestion), "answer": Self.commentJSON(savedAnswer), "status": result.status]
         } catch {
-            let failed = markQuestionFailed(savedQuestion, existingAnswer: nil, repoRoot: repoRoot, store: scopedStore)
+            let failed = markQuestionFailed(savedQuestion, existingAnswer: pendingAnswer, repoRoot: repoRoot, store: scopedStore)
             let savedAnswer = failed.answer
             app.postReviewQuestionNotification(
                 workspace: workspace,
@@ -829,6 +850,7 @@ final class DiffCommentsBridge: NSObject, WKScriptMessageHandlerWithReply {
             DiffCommentSubmissionPool.Entry(
                 commentId: comment.id,
                 repoRoot: DiffCommentStore.canonicalRepoRoot(repoRoot),
+                repositoryLabel: comment.repositoryLabel,
                 submissionText: submissionText
             ),
             workspaceId: workspaceId
