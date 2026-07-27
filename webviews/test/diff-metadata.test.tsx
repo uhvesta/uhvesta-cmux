@@ -43,6 +43,9 @@ test("binary and mode-only diffs render explicit localized header metadata", () 
 test("stable hunk numbers are attached to Pierre's rendered gutter", () => {
   const fileDiff = {
     name: "src/example.ts",
+    // Git patches remain marked partial even when the sidecar requested
+    // effectively unlimited context and therefore supplied the full file.
+    isPartial: true,
     hunks: [
       { additionStart: 10, additionCount: 2, deletionStart: 9, deletionCount: 2 },
       { additionStart: 42, additionCount: 1, deletionStart: 41, deletionCount: 1 },
@@ -149,6 +152,7 @@ test("collapsing a Full File hunk gives Pierre real collapsed context while pres
   ]));
 
   expect(collapsed).not.toBe(fileDiff);
+  expect(collapsed.isPartial).toBe(false);
   expect(collapsed.hunks).toHaveLength(2);
   expect(collapsed.hunks.map((hunk: any) => hunk.cmuxHunkId)).toEqual([hunkId, hunkId]);
   expect(collapsed.hunks.every((hunk: any) => hunk.hunkContent.every((part: any) => part.type === "change"))).toBe(true);
