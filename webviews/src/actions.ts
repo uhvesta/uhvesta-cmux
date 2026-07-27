@@ -75,6 +75,28 @@ export async function copyGitApplyCommand(
   return label("copiedGitApplyCommand");
 }
 
+/** Copies an already-rendered review prompt through the same WebKit-safe path. */
+export async function copyReviewPrompt(
+  prompt: string,
+  label: DiffViewerLabelResolver,
+  fallbackTextarea: HTMLTextAreaElement | null,
+): Promise<string> {
+  if (navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(prompt);
+      return label("copiedReviewPrompt");
+    } catch {
+      // A generated viewer can expose Clipboard API yet reject it after focus
+      // changes, so retain the same React-owned fallback as git-apply copy.
+    }
+  }
+  if (!fallbackTextarea) throw new Error("Clipboard API unavailable");
+  fallbackTextarea.value = prompt;
+  fallbackTextarea.select();
+  if (!document.execCommand("copy")) throw new Error("Clipboard copy failed");
+  return label("copiedReviewPrompt");
+}
+
 function safeGitApplyDelimiter(patch: string): string {
   const lines = new Set(patch.split(/\r?\n/));
   let delimiter = "CMUX_DIFF_PATCH";

@@ -214,6 +214,7 @@ extension TerminalController {
         let preview = Self.mobileWorkspacePreview(latestNotification: latestNotification)
         return [
             "id": workspace.id.uuidString,
+            "stable_id": workspace.stableId.uuidString,
             "window_id": v2OrNull(windowID?.uuidString),
             "title": workspace.title,
             "current_directory": v2OrNull(workspace.presentedCurrentDirectory),

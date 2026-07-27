@@ -175,6 +175,7 @@ enum AppSettingsFileMapping {
 
     static let stringSettings: [SettingsFileStringMapping] = [
         .init(jsonKey: "preferredEditor", defaultsKey: app.preferredEditor.userDefaultsKey),
+        .init(jsonKey: "diffViewerBranchBaseRef", defaultsKey: app.diffViewerBranchBaseRef.userDefaultsKey),
     ]
 }
 
@@ -396,6 +397,7 @@ extension CmuxSettingsFileStore {
         "app.keepWorkspaceOpenWhenClosingLastSurface",
         "app.focusPaneOnFirstClick",
         "app.preferredEditor",
+        "app.diffViewerBranchBaseRef",
         "app.openSupportedFilesInCmux",
         "app.openMarkdownInCmuxViewer",
         "app.iMessageMode",

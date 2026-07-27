@@ -5,7 +5,7 @@ import { FileTree, useFileTree } from "@pierre/trees/react";
 import { preparePresortedFileTreeInput } from "@pierre/trees";
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import "../../Resources/markdown-viewer/viewer-navigation.js";
-import { copyGitApplyCommand, resolveDiffNavigationURL } from "./actions";
+import { copyGitApplyCommand, copyReviewPrompt, resolveDiffNavigationURL } from "./actions";
 import { resolveDiffViewerAppearance } from "./appearance";
 import { BranchBasePicker, branchPickerStateKey, type BranchPickerPayload } from "./BranchBasePicker";
 import { lineTextFor, type CommentFileDiff } from "./comments/anchor";
@@ -17,9 +17,12 @@ import {
   type SidebarCommentEntry,
 } from "./comments/annotations";
 import {
+  askComment as bridgeAskComment,
   deleteComment as bridgeDeleteComment,
   diffCommentsBridgeAvailable,
+  listComments as bridgeListComments,
   saveComment as bridgeSaveComment,
+  sendReviewPrompt as bridgeSendReviewPrompt,
 } from "./comments/bridge";
 import { CommentComposer } from "./comments/CommentComposer";
 import { CommentsSidebarSection } from "./comments/CommentsSection";
@@ -31,13 +34,20 @@ import type {
   DiffCommentRecord,
   DiffCommentSide,
 } from "./comments/types";
-import { useCommentsBootstrap } from "./comments/useCommentsBootstrap";
 import { resolveDiffFileLanguage, resolveDiffPreloadLanguages } from "./diff-language";
-import { fileName, type DiffItem, type FileTreeSource, type StreamMetrics, streamPatch } from "./diff-stream";
-import { DiffHeaderMetadata } from "./diff-metadata";
+import { fileName, type AggregateRepository, type DiffItem, type FileTreeSource, type StreamMetrics, streamPatch } from "./diff-stream";
+import { decorateRenderedHunkGutters, DiffHeaderMetadata } from "./diff-metadata";
 import { applyPierreFileTreeGitStatus, planPierreFileTreeRefresh, selectPierreFileTreePath } from "./file-tree-refresh";
 import { Icon, type IconName } from "./icons";
 import { createDiffViewerLabelResolver, shouldAssertMissingLabels } from "./labels";
+import {
+  adjacentReviewHunk,
+  cursorForHunk,
+  requestedReviewHunk,
+  reviewHunks,
+  type ReviewCursor,
+} from "./review-hunks";
+import { isAskComment, isRemoteReviewRoot, reviewPrompt } from "./review-prompt";
 import {
   codeViewOptions,
   fileTreeUnsafeCSS,
@@ -74,6 +84,7 @@ type AppState = {
   comments: DiffCommentRecord[];
   copyFeedback: string;
   draft: CommentDraft | null;
+  editingCommentId: string | null;
   fileSearchOpen: boolean;
   fileSearchRequest: number;
   filesWidth: number;
@@ -96,6 +107,7 @@ type AppAction =
   | { type: "replace-comments"; comments: DiffCommentRecord[] }
   | { type: "set-copy-feedback"; message: string }
   | { type: "set-draft"; draft: CommentDraft | null }
+  | { type: "set-editing-comment"; id: string | null }
   | { type: "set-file-search-open"; open: boolean }
   | { type: "request-file-search" }
   | { type: "set-files-width"; width: number }
@@ -121,6 +133,7 @@ function initialAppState(config: DiffViewerConfig, initialStatus: DiffViewerStat
     comments: [],
     copyFeedback: "",
     draft: null,
+    editingCommentId: null,
     fileSearchOpen: false,
     fileSearchRequest: 0,
     filesWidth: 252,
@@ -167,6 +180,7 @@ function reducer(state: AppState, action: AppAction): AppState {
       activeItemId: "",
       activeTreePath: "",
       draft: null,
+      editingCommentId: null,
       items: [],
       languages: ["text"],
       metrics: null,
@@ -215,6 +229,8 @@ function reducer(state: AppState, action: AppAction): AppState {
       draft: action.draft,
       items: applyCommentAnnotations(state.items, state.comments, action.draft),
     };
+  case "set-editing-comment":
+    return { ...state, editingCommentId: action.id, draft: action.id == null ? state.draft : null };
   case "set-file-search-open":
     return { ...state, fileSearchOpen: action.open, filesVisible: action.open ? true : state.filesVisible };
   case "request-file-search":
@@ -285,9 +301,13 @@ export function App({ config, initialStatus }: ConfigProps) {
   }
   const [activePatchURL, setActivePatchURL] = useState<string | undefined>(payload.patchURL);
   const [state, dispatch] = useReducer(reducer, initialAppState(config, initialStatus));
+  const [expandedFullFileHunks, setExpandedFullFileHunks] = useState<ReadonlySet<string>>(() => new Set());
   const latestState = useSyncedRef(state);
   const codeViewRef = useRef<CodeViewHandle<any> | null>(null);
   const codeViewScrollTopRef = useRef(0);
+  const navigationCursorRef = useRef<ReviewCursor | null>(null);
+  const openedFullFileHunkRef = useRef(false);
+  const appliedFullFileHunksRef = useRef(new Set<string>());
   const copyFallbackRef = useRef<HTMLTextAreaElement | null>(null);
   const activeSessionRef = useRef<ActiveDiffSession | null>(null);
   const viewerContainerRef = useRef<HTMLDivElement | null>(null);
@@ -295,17 +315,66 @@ export function App({ config, initialStatus }: ConfigProps) {
   const workerPoolOptions = createDiffWorkerPoolOptions(workerModuleURL);
   const highlighterOptions = workerHighlighterOptions(state.options, appearance, state.languages);
   const payloadRepoRoot = typeof payload.repoRoot === "string" && payload.repoRoot !== "" ? payload.repoRoot : null;
-  const commentRepoRoot = diffSourceRepoRoot(resolvedSessionSource ?? activeSessionSource) ?? payloadRepoRoot;
-  const bridgeAvailable = diffCommentsBridgeAvailable() && commentRepoRoot != null;
+  const aggregateRepositories = useMemo(() => aggregateReviewRepositories(payload.aggregateManifest), [payload.aggregateManifest]);
+  const commentRepoRoots = useMemo(() => {
+    const roots = aggregateRepositories.map((repository) => repository.root);
+    const current = diffSourceRepoRoot(resolvedSessionSource ?? activeSessionSource) ?? payloadRepoRoot;
+    if (roots.length === 0 && current != null) roots.push(current);
+    return Array.from(new Set(roots));
+  }, [activeSessionSource, aggregateRepositories, payloadRepoRoot, resolvedSessionSource]);
+  const bridgeAvailable = diffCommentsBridgeAvailable() && commentRepoRoots.length > 0;
   const commentLabels = resolveCommentLabels(payload);
   const comments = useDiffComments({
     bridgeAvailable,
     dispatch,
     latestState,
-    repoRoot: commentRepoRoot,
+    repoRoots: commentRepoRoots,
   });
   const renderedCodeViewOptions = codeViewOptions(state.options, appearance);
+  useEffect(() => {
+    if (state.options.layout !== "full") return;
+    const ids = reviewHunks(state.items).map((hunk) => hunk.hunkId);
+    if (ids.length === 0) return;
+    setExpandedFullFileHunks((current) => {
+      const next = new Set(current);
+      for (const id of ids) next.add(id);
+      return next.size === current.size ? current : next;
+    });
+  }, [state.items, state.options.layout]);
+  const expandFullFileHunk = useCallback((item: DiffItem, hunkIndex: number, hunkId: string) => {
+    setExpandedFullFileHunks((current) => new Set(current).add(hunkId));
+    const instance = codeViewRef.current?.getInstance()?.getRenderedItems()
+      .find((rendered) => rendered.id === item.id && rendered.type === "diff")?.instance as any;
+    instance?.expandHunk(hunkIndex, "both", Number.MAX_SAFE_INTEGER);
+  }, []);
   renderedCodeViewOptions.onGutterUtilityClick = comments.onGutterUtilityClick as any;
+  renderedCodeViewOptions.onLineClick = ((props: { lineNumber: number; annotationSide: DiffCommentSide }, context: { item: DiffItem }) => {
+    navigationCursorRef.current = {
+      itemId: context.item.id,
+      lineNumber: props.lineNumber,
+      side: props.annotationSide,
+    };
+  }) as any;
+  renderedCodeViewOptions.onPostRender = ((node: HTMLElement, instance: any, _phase: unknown, context: { item: DiffItem }) => {
+    node.dataset.cmuxReviewItemId = context.item.id;
+    const renderedRoot = node.getRootNode();
+    if ("host" in renderedRoot && renderedRoot.host instanceof HTMLElement) {
+      renderedRoot.host.dataset.cmuxReviewItemId = context.item.id;
+    }
+    decorateRenderedHunkGutters(node, context.item.fileDiff);
+    if (state.options.layout === "full") {
+      const hunks = Array.isArray(context.item.fileDiff?.hunks) ? context.item.fileDiff.hunks : [];
+      hunks.forEach((hunk: any, index: number) => {
+        const hunkId = hunk?.cmuxHunkId;
+        const appliedKey = `${context.item.id}:${hunkId}`;
+        if (typeof hunkId === "string" && expandedFullFileHunks.has(hunkId) && !appliedFullFileHunksRef.current.has(appliedKey)) {
+          appliedFullFileHunksRef.current.add(appliedKey);
+          instance?.expandHunk(index, "both", Number.MAX_SAFE_INTEGER);
+        }
+      });
+    }
+    CmuxViewerNavigation.refreshRenderedRows?.(viewerContainerRef.current);
+  }) as any;
   const closeActiveSession = useCallback(() => {
     const activeSession = activeSessionRef.current;
     if (!transport) {
@@ -352,8 +421,8 @@ export function App({ config, initialStatus }: ConfigProps) {
     closeActiveSession,
     activeSessionSource,
     rememberResolvedSessionSource,
+    aggregateRepositories,
   );
-  useCommentsBootstrap(bridgeAvailable ? commentRepoRoot : null, comments.onLoaded);
   useOptionsDismiss(state.optionsOpen, dispatch);
   useFileSearchDismiss(state.fileSearchOpen, dispatch);
 
@@ -363,6 +432,9 @@ export function App({ config, initialStatus }: ConfigProps) {
       return (
         <CommentComposer
           labels={commentLabels}
+          askUnavailableMessage={isRemoteReviewRoot(item.commentRepoRoot ?? commentRepoRoots[0])
+            ? commentLabels.askUnavailableRemote
+            : undefined}
           onCancel={() => dispatch({ type: "set-draft", draft: null })}
           onSave={(message) => comments.saveDraft(item, message)}
         />
@@ -372,8 +444,16 @@ export function App({ config, initialStatus }: ConfigProps) {
       <SavedComment
         comment={metadata.comment}
         labels={commentLabels}
-        onDelete={() => comments.remove(metadata.comment)}
-        onSaveMessage={(message) => comments.editMessage(metadata.comment, message, item.fileDiff)}
+        onDelete={() => {
+          comments.remove(metadata.comment);
+          dispatch({ type: "set-editing-comment", id: null });
+        }}
+        onSaveMessage={(message) => {
+          comments.editMessage(metadata.comment, message, item);
+          dispatch({ type: "set-editing-comment", id: null });
+        }}
+        forceEditing={state.editingCommentId === metadata.comment.id}
+        replies={state.comments.filter((comment) => comment.parentId === metadata.comment.id)}
       />
     );
   };
@@ -432,7 +512,84 @@ export function App({ config, initialStatus }: ConfigProps) {
   const handleCodeViewScroll = useCallback((scrollTop: number) => {
     codeViewScrollTopRef.current = scrollTop;
   }, []);
-  useNativeViewerNavigation(viewerContainerRef, dispatch, jumpAdjacentFile);
+  const navigateHunk = useCallback((direction: -1 | 1) => {
+    const target = adjacentReviewHunk(reviewHunks(latestState.current.items), navigationCursorRef.current, direction);
+    if (target == null) return false;
+    navigationCursorRef.current = cursorForHunk(target);
+    codeViewRef.current?.scrollTo({
+      type: "line",
+      id: target.itemId,
+      lineNumber: target.lineNumber,
+      side: target.side,
+      align: "center",
+      behavior: "smooth-auto",
+    });
+    dispatch({
+      type: "set-active-item",
+      itemId: target.itemId,
+      treePath: latestState.current.treeSource?.treePathByItemId.get(target.itemId),
+    });
+    return true;
+  }, [latestState]);
+  const beginCommentAtCursor = useCallback(() => {
+    const cursor = navigationCursorRef.current;
+    if (cursor == null) return false;
+    const current = latestState.current;
+    const item = current.items.find((candidate) => candidate.id === cursor.itemId);
+    if (item == null) return false;
+    const existing = current.comments.find((comment) =>
+      comment.parentId == null && comment.filePath === commentFilePath(item) &&
+      (comment.repositoryRoot == null || comment.repositoryRoot === item.commentRepoRoot) &&
+      comment.side === cursor.side && comment.startLine <= cursor.lineNumber && comment.endLine >= cursor.lineNumber,
+    );
+    if (existing) {
+      dispatch({ type: "set-editing-comment", id: existing.id });
+      return true;
+    }
+    dispatch({
+      type: "set-draft",
+      draft: {
+        itemId: item.id,
+        side: cursor.side,
+        startLine: cursor.lineNumber,
+        endLine: cursor.lineNumber,
+      },
+    });
+    return true;
+  }, [latestState]);
+  const updateCursorFromRenderedRow = useCallback((row: { itemId?: string; lineNumber: number; side: DiffCommentSide }) => {
+    const previous = navigationCursorRef.current;
+    if (row.itemId) {
+      navigationCursorRef.current = { itemId: row.itemId, lineNumber: row.lineNumber, side: row.side };
+      return;
+    }
+    if (previous) {
+      navigationCursorRef.current = { ...previous, lineNumber: row.lineNumber, side: row.side };
+      return;
+    }
+    const current = latestState.current;
+    const item = current.items.find((candidate) => candidate.id === current.activeItemId) ?? current.items[0];
+    if (item) navigationCursorRef.current = { itemId: item.id, lineNumber: row.lineNumber, side: row.side };
+  }, [latestState]);
+  useNativeViewerNavigation(
+    viewerContainerRef,
+    dispatch,
+    jumpAdjacentFile,
+    navigateHunk,
+    beginCommentAtCursor,
+    updateCursorFromRenderedRow,
+  );
+  useOpenFullFileHunk(
+    state.options.layout,
+    state.items,
+    state.metrics,
+    payload.requestedHunk ?? payload.hunk ?? payload.hunkNumber,
+    codeViewRef,
+    navigationCursorRef,
+    openedFullFileHunkRef,
+    dispatch,
+    state.treeSource,
+  );
   const setStatus = (status: DiffViewerStatus) => {
     applyDiffViewerStatusToDocument(status);
     dispatch({ type: "set-status", status });
@@ -454,6 +611,22 @@ export function App({ config, initialStatus }: ConfigProps) {
             dispatch({ type: "set-copy-feedback", message });
           } catch {
             dispatch({ type: "set-copy-feedback", message: label("copyFailedGitApplyCommand") });
+          }
+        }}
+        onCopyReviewPrompt={async () => {
+          try {
+            const message = await copyReviewPrompt(reviewPrompt(state.comments), label, copyFallbackRef.current);
+            dispatch({ type: "set-copy-feedback", message });
+          } catch {
+            dispatch({ type: "set-copy-feedback", message: label("copyFailedGitApplyCommand") });
+          }
+        }}
+        onSendReviewPrompt={async () => {
+          try {
+            await comments.sendReviewPrompt();
+            dispatch({ type: "set-copy-feedback", message: label("queuedReviewPrompt") });
+          } catch {
+            dispatch({ type: "set-copy-feedback", message: label("sendReviewPromptFailed") });
           }
         }}
         onJump={scrollToItem}
@@ -523,7 +696,17 @@ export function App({ config, initialStatus }: ConfigProps) {
                 onScroll={handleCodeViewScroll}
                 options={renderedCodeViewOptions}
                 renderHeaderMetadata={(item) => (
-                  <DiffHeaderMetadata fileDiff={(item as DiffItem).fileDiff} label={label} />
+                  <DiffHeaderMetadata
+                    fileDiff={(item as DiffItem).fileDiff}
+                    label={label}
+                    repositoryLabel={(item as DiffItem).repositoryLabel}
+                    repositoryRoot={(item as DiffItem).commentRepoRoot}
+                    repositoryBaseRef={(item as DiffItem).repositoryBaseRef}
+                    repositoryStart={(item as DiffItem).repositoryStart}
+                    fullFile={state.options.layout === "full"}
+                    expandedHunkIDs={expandedFullFileHunks}
+                    onExpandHunk={(hunkIndex, hunkId) => expandFullFileHunk(item as DiffItem, hunkIndex, hunkId)}
+                  />
                 )}
                 renderAnnotation={(annotation, item) =>
                   renderCommentAnnotation(annotation as CommentAnnotation, item as DiffItem)}
@@ -582,18 +765,27 @@ function useDiffComments({
   bridgeAvailable,
   dispatch,
   latestState,
-  repoRoot,
+  repoRoots,
 }: {
   bridgeAvailable: boolean;
   dispatch: React.Dispatch<AppAction>;
   latestState: React.MutableRefObject<AppState>;
-  repoRoot: string | null;
+  repoRoots: readonly string[];
 }) {
-  const activeRepoRoot = useSyncedRef(repoRoot);
-  const onLoaded = useCallback(
-    (comments: DiffCommentRecord[]) => dispatch({ type: "replace-comments", comments }),
-    [dispatch],
-  );
+  const activeRepoRoots = useSyncedRef(repoRoots);
+  const questionPollTimers = useRef(new Map<string, number>());
+  const onLoaded = useCallback((comments: DiffCommentRecord[]) => dispatch({ type: "replace-comments", comments }), [dispatch]);
+
+  useEffect(() => {
+    if (!bridgeAvailable || repoRoots.length === 0) return;
+    let cancelled = false;
+    void Promise.all(repoRoots.map(async (repositoryRoot) =>
+      (await bridgeListComments(repositoryRoot)).map((comment) => ({ ...comment, repositoryRoot })),
+    )).then((groups) => {
+      if (!cancelled) onLoaded(groups.flat());
+    }).catch((error) => console.warn("cmux diff comments load failed", error));
+    return () => { cancelled = true; };
+  }, [bridgeAvailable, onLoaded, repoRoots]);
 
   const onGutterUtilityClick = (range: SelectedLineRange, context: { item: DiffItem }) => {
     const side: DiffCommentSide = range.side === "deletions" ? "deletions" : "additions";
@@ -608,13 +800,45 @@ function useDiffComments({
     });
   };
 
+  const stopQuestionPoll = useCallback((questionID: string) => {
+    const timer = questionPollTimers.current.get(questionID);
+    if (timer != null) window.clearInterval(timer);
+    questionPollTimers.current.delete(questionID);
+  }, []);
+
+  const startQuestionPoll = useCallback((questionID: string) => {
+    const repositoryRoot = latestState.current.comments.find((comment) => comment.id === questionID)?.repositoryRoot;
+    if (!bridgeAvailable || repositoryRoot == null || questionPollTimers.current.has(questionID)) return;
+    const refresh = async () => {
+      try {
+        const fresh = await bridgeListComments(repositoryRoot);
+        if (!activeRepoRoots.current.includes(repositoryRoot)) return;
+        const others = latestState.current.comments.filter((comment) => comment.repositoryRoot !== repositoryRoot);
+        dispatch({ type: "replace-comments", comments: [...others, ...fresh.map((comment) => ({ ...comment, repositoryRoot }))] });
+        const answer = fresh.find((comment) => comment.parentId === questionID && comment.readOnly);
+        if (answer?.requestStatus && answer.requestStatus !== "running") stopQuestionPoll(questionID);
+      } catch {
+        // The next interval gets another chance while the native sidecar is live.
+      }
+    };
+    void refresh();
+    questionPollTimers.current.set(questionID, window.setInterval(() => { void refresh(); }, 700));
+  }, [activeRepoRoots, bridgeAvailable, dispatch, latestState, stopQuestionPoll]);
+
+  useEffect(() => () => {
+    for (const timer of questionPollTimers.current.values()) window.clearInterval(timer);
+    questionPollTimers.current.clear();
+  }, []);
+
   const saveDraft = (item: DiffItem, message: string) => {
     const draft = latestState.current.draft;
     if (draft == null || draft.itemId !== item.id || message.trim() === "") {
       return;
     }
+    const repoRoot = item.commentRepoRoot ?? repoRoots[0];
+    if (repoRoot == null) return;
     const input = {
-      filePath: fileName(item.fileDiff, ""),
+      filePath: commentFilePath(item),
       side: draft.side,
       startLine: draft.startLine,
       endLine: draft.endLine,
@@ -622,15 +846,38 @@ function useDiffComments({
       message,
     };
     const record = { ...input, submissionText: commentSubmissionText(input, item.fileDiff) };
-    const save = bridgeAvailable && repoRoot != null
+    if (isAskComment(record)) {
+      if (isRemoteReviewRoot(repoRoot)) {
+        // The visible composer affordance explains this before submission; this
+        // guard prevents a stale/automated UI from ever attempting a sidecar.
+        return;
+      }
+      const question = record.message.replace(/^\/ask(?:\s+|$)/i, "").trim();
+      if (question === "") return;
+      const askRecord = { ...record, submissionText: undefined };
+      const ask = bridgeAvailable
+        ? bridgeAskComment(repoRoot, askRecord, reviewPrompt(latestState.current.comments), question)
+        : Promise.resolve({ question: localCommentRecord(askRecord), status: "failed" as const });
+      ask
+        .then((result) => {
+          if (!activeRepoRoots.current.includes(repoRoot)) return;
+          if (result.question) dispatch({ type: "upsert-comment", comment: { ...result.question, repositoryRoot: repoRoot } });
+          if (result.answer) dispatch({ type: "upsert-comment", comment: { ...result.answer, repositoryRoot: repoRoot } });
+          if (result.question && result.status === "running") startQuestionPoll(result.question.id);
+          dispatch({ type: "set-draft", draft: null });
+        })
+        .catch((error) => console.warn("cmux review question failed", error));
+      return;
+    }
+    const save = bridgeAvailable
       ? bridgeSaveComment(repoRoot, record)
       : Promise.resolve(localCommentRecord(record));
     save
       .then((saved) => {
-        if (activeRepoRoot.current !== repoRoot) {
+        if (!activeRepoRoots.current.includes(repoRoot)) {
           return;
         }
-        dispatch({ type: "upsert-comment", comment: saved });
+        dispatch({ type: "upsert-comment", comment: { ...saved, repositoryRoot: repoRoot } });
         dispatch({ type: "set-draft", draft: null });
       })
       .catch((error) => console.warn("cmux diff comment save failed", error));
@@ -639,37 +886,52 @@ function useDiffComments({
   const editMessage = (
     comment: DiffCommentRecord,
     message: string,
-    fileDiff: CommentFileDiff | null | undefined,
+    item: DiffItem,
   ) => {
     if (message.trim() === "") {
+      remove(comment);
       return;
     }
+    const repoRoot = comment.repositoryRoot ?? item.commentRepoRoot ?? repoRoots[0];
+    if (repoRoot == null) return;
     const edited = { ...comment, message, updatedAt: new Date().toISOString() };
-    const updated = { ...edited, submissionText: commentSubmissionText(edited, fileDiff) };
-    const save = bridgeAvailable && repoRoot != null
+    const updated = { ...edited, submissionText: commentSubmissionText(edited, item.fileDiff) };
+    const save = bridgeAvailable
       ? bridgeSaveComment(repoRoot, updated)
       : Promise.resolve(updated);
     save
       .then((saved) => {
-        if (activeRepoRoot.current === repoRoot) {
-          dispatch({ type: "upsert-comment", comment: saved });
+        if (activeRepoRoots.current.includes(repoRoot)) {
+          dispatch({ type: "upsert-comment", comment: { ...saved, repositoryRoot: repoRoot } });
         }
       })
       .catch((error) => console.warn("cmux diff comment edit failed", error));
   };
 
   const remove = (comment: DiffCommentRecord) => {
-    const targetRepoRoot = repoRoot;
-    if (bridgeAvailable && repoRoot != null) {
-      bridgeDeleteComment(repoRoot, comment.id)
+    stopQuestionPoll(comment.id);
+    const targetRepoRoot = comment.repositoryRoot ?? repoRoots[0];
+    if (bridgeAvailable && targetRepoRoot != null) {
+      bridgeDeleteComment(targetRepoRoot, comment.id)
         .catch((error) => console.warn("cmux diff comment delete failed", error));
     }
-    if (activeRepoRoot.current === targetRepoRoot) {
+    if (targetRepoRoot != null && activeRepoRoots.current.includes(targetRepoRoot)) {
       dispatch({ type: "remove-comment", id: comment.id });
     }
   };
 
-  return { editMessage, onGutterUtilityClick, onLoaded, remove, saveDraft };
+  const sendReviewPrompt = async (): Promise<number> => {
+    if (!bridgeAvailable || repoRoots.length === 0) throw new Error("Diff comments bridge is unavailable.");
+    const feedback = latestState.current.comments.filter((comment) =>
+      comment.parentId == null && !comment.readOnly && !comment.consumedAt && !isAskComment(comment),
+    );
+    return bridgeSendReviewPrompt(reviewPrompt(feedback), feedback.map((comment) => ({
+      id: comment.id,
+      repoRoot: comment.repositoryRoot ?? repoRoots[0]!,
+    })));
+  };
+
+  return { editMessage, onGutterUtilityClick, onLoaded, remove, saveDraft, sendReviewPrompt };
 }
 
 function localCommentRecord(
@@ -677,6 +939,23 @@ function localCommentRecord(
 ): DiffCommentRecord {
   const now = new Date().toISOString();
   return { ...input, id: crypto.randomUUID(), createdAt: now, updatedAt: now };
+}
+
+function aggregateReviewRepositories(value: unknown): AggregateRepository[] {
+  if (value == null || typeof value !== "object" || Array.isArray(value)) return [];
+  const repositories = (value as Record<string, unknown>).repositories;
+  if (!Array.isArray(repositories)) return [];
+  return repositories.flatMap((candidate) => {
+    if (candidate == null || typeof candidate !== "object" || Array.isArray(candidate)) return [];
+    const entry = candidate as Record<string, unknown>;
+    if (typeof entry.id !== "string" || typeof entry.root !== "string" || typeof entry.label !== "string" ||
+      entry.id.trim() === "" || entry.root.trim() === "") return [];
+    return [{ id: entry.id, root: entry.root, label: entry.label, baseRef: typeof entry.baseRef === "string" ? entry.baseRef : undefined }];
+  });
+}
+
+function commentFilePath(item: DiffItem): string {
+  return item.commentFilePath ?? fileName(item.fileDiff, "");
 }
 
 function initialDiffViewerLayout(payload: Record<string, any>): DiffViewerLayout {
@@ -704,7 +983,23 @@ function persistDiffViewerLayout(layout: DiffViewerLayout): void {
 }
 
 function parseDiffViewerLayout(value: unknown): DiffViewerLayout | null {
-  return value === "split" || value === "unified" ? value : null;
+  return value === "split" || value === "unified" || value === "full" ? value : null;
+}
+
+export function nextDiffViewerLayout(layout: DiffViewerLayout): DiffViewerLayout {
+  switch (layout) {
+  case "unified": return "split";
+  case "split": return "full";
+  case "full": return "unified";
+  }
+}
+
+function switchLayoutLabel(layout: DiffViewerLayout, label: DiffViewerLabelResolver): string {
+  switch (layout) {
+  case "unified": return label("switchToSplitDiff");
+  case "split": return label("switchToFullFile");
+  case "full": return label("switchToUnifiedDiff");
+  }
 }
 
 function WorkerRenderOptionsSync({
@@ -724,6 +1019,8 @@ function Toolbar({
   dispatch,
   label,
   onCopyGitApply,
+  onCopyReviewPrompt,
+  onSendReviewPrompt,
   onJump,
   onNavigate,
   onSelectSessionSource,
@@ -737,6 +1034,8 @@ function Toolbar({
   dispatch: React.Dispatch<AppAction>;
   label: DiffViewerLabelResolver;
   onCopyGitApply: () => void;
+  onCopyReviewPrompt: () => void;
+  onSendReviewPrompt: () => void;
   onJump: (itemId: string) => void;
   onNavigate: (url: string) => void;
   onSelectSessionSource: (source: DiffSource) => void;
@@ -823,9 +1122,9 @@ function Toolbar({
             id="layout-toggle"
             className="toolbar-icon"
             type="button"
-            title={state.options.layout === "split" ? label("switchToUnifiedDiff") : label("switchToSplitDiff")}
-            aria-label={state.options.layout === "split" ? label("switchToUnifiedDiff") : label("switchToSplitDiff")}
-            onClick={() => onSetLayout(state.options.layout === "split" ? "unified" : "split")}
+            title={switchLayoutLabel(state.options.layout, label)}
+            aria-label={switchLayoutLabel(state.options.layout, label)}
+            onClick={() => onSetLayout(nextDiffViewerLayout(state.options.layout))}
           >
             <Icon name={state.options.layout} />
           </button>
@@ -865,6 +1164,8 @@ function Toolbar({
           externalURL={externalURL}
           label={label}
           onCopyGitApply={onCopyGitApply}
+          onCopyReviewPrompt={onCopyReviewPrompt}
+          onSendReviewPrompt={onSendReviewPrompt}
           onReload={onReload}
           onSetLayout={onSetLayout}
           state={state}
@@ -1200,6 +1501,8 @@ function OptionsMenu({
   externalURL,
   label,
   onCopyGitApply,
+  onCopyReviewPrompt,
+  onSendReviewPrompt,
   onReload,
   onSetLayout,
   state,
@@ -1208,6 +1511,8 @@ function OptionsMenu({
   externalURL: string | null;
   label: DiffViewerLabelResolver;
   onCopyGitApply: () => void;
+  onCopyReviewPrompt: () => void;
+  onSendReviewPrompt: () => void;
   onReload: () => void;
   onSetLayout: (layout: DiffViewerLayout) => void;
   state: AppState;
@@ -1223,7 +1528,7 @@ function OptionsMenu({
           always listed here so they stay reachable regardless of what the bar
           decided to drop. The bar hides its duplicate icon button when it
           overflows; the menu copy is the canonical fallback. */}
-      <MenuButton icon={state.options.layout} label={state.options.layout === "split" ? label("switchToUnifiedDiff") : label("switchToSplitDiff")} onClick={() => onSetLayout(state.options.layout === "split" ? "unified" : "split")} />
+      <MenuButton icon={state.options.layout} label={switchLayoutLabel(state.options.layout, label)} onClick={() => onSetLayout(nextDiffViewerLayout(state.options.layout))} />
       {externalURL ? (
         <MenuButton icon="external" label={label("openSourceURL")} onClick={() => window.open(externalURL, "_blank", "noreferrer")} />
       ) : null}
@@ -1257,6 +1562,8 @@ function OptionsMenu({
       </div>
       <div className="menu-separator" />
       <MenuButton icon="clipboard" label={label("copyGitApplyCommand")} onClick={onCopyGitApply} />
+      <MenuButton icon="clipboard" label={label("copyReviewPrompt")} onClick={onCopyReviewPrompt} />
+      <MenuButton icon="arrow" label={label("sendReviewPrompt")} onClick={onSendReviewPrompt} />
     </div>
   );
 }
@@ -1628,6 +1935,7 @@ function useRenderDiff(
   closeActiveSession: () => Promise<void>,
   sessionSource: DiffSource | null,
   onResolvedSessionSource: (source: DiffSource) => void,
+  aggregateRepositories: readonly AggregateRepository[],
 ) {
   useEffect(() => {
     if (isStatusOnlyPayload(config.payload, transport, sessionSource)) {
@@ -1675,6 +1983,7 @@ function useRenderDiff(
         const streamedItems: DiffItem[] = [];
         dispatch({ type: "set-status", status: createDiffViewerStatus(label("parsingDiff"), { loading: true }) });
         await streamPatch({
+          aggregateRepositories,
           getCollapsed: () => latestState.current.options.collapsed,
           initialFileTreeRowCount: getInitialFileTreeRowCount(),
           label,
@@ -1739,7 +2048,7 @@ function useRenderDiff(
       window.removeEventListener("pagehide", handlePageHide);
       void closeActiveSession();
     };
-  }, [activeSessionRef, closeActiveSession, config, dispatch, label, latestState, onPatchURL, onResolvedSessionSource, sessionSource, transport]);
+  }, [activeSessionRef, aggregateRepositories, closeActiveSession, config, dispatch, label, latestState, onPatchURL, onResolvedSessionSource, sessionSource, transport]);
 }
 
 function closeDiffSession(transport: DiffTransport, session: ActiveDiffSession): Promise<void> {
@@ -1928,14 +2237,66 @@ function usePageDataAttributes(state: AppState) {
   }, [state]);
 }
 
+export function createRenderedRowNavigationState(
+  onMoveRow: (row: { itemId?: string; lineNumber: number; side: DiffCommentSide }) => void,
+  onComment: () => boolean,
+) {
+  let pendingComment = false;
+  return {
+    comment(viewer: HTMLElement | null): boolean {
+      if (viewer && CmuxViewerNavigation.hasPendingRenderedRowMove?.(viewer)) {
+        pendingComment = true;
+        return true;
+      }
+      return onComment();
+    },
+    move(viewer: HTMLElement | null, direction: -1 | 1): boolean {
+      return Boolean(CmuxViewerNavigation.moveRenderedRow?.(viewer, direction));
+    },
+    resolve(row: { itemId?: string; lineNumber: number; side: DiffCommentSide }): void {
+      onMoveRow(row);
+      if (pendingComment) {
+        pendingComment = false;
+        onComment();
+      }
+    },
+  };
+}
+
 function useNativeViewerNavigation(
   viewerRef: React.MutableRefObject<HTMLDivElement | null>,
   dispatch: React.Dispatch<AppAction>,
   onJumpAdjacentFile: (direction: -1 | 1) => void,
+  onNavigateHunk: (direction: -1 | 1) => boolean,
+  onComment: () => boolean,
+  onMoveRow: (row: { itemId?: string; lineNumber: number; side: DiffCommentSide }) => void,
 ) {
   useEffect(() => {
+    const renderedRowNavigation = createRenderedRowNavigationState(onMoveRow, onComment);
+    const onRenderedRowSelected = (event: Event) => {
+      const customEvent = event as CustomEvent<unknown>;
+      if (event.target !== viewerRef.current || typeof customEvent.detail !== "object" || customEvent.detail == null) {
+        return;
+      }
+      const row = customEvent.detail as { itemId?: unknown; lineNumber?: unknown; side?: unknown };
+      const lineNumber = typeof row.lineNumber === "number" && Number.isFinite(row.lineNumber) ? row.lineNumber : null;
+      if (lineNumber == null || (row.side !== "additions" && row.side !== "deletions")) {
+        return;
+      }
+      renderedRowNavigation.resolve({
+        itemId: typeof row.itemId === "string" ? row.itemId : undefined,
+        lineNumber,
+        side: row.side,
+      });
+    };
+    document.addEventListener("cmux-diff-viewer-rendered-row-selected", onRenderedRowSelected);
     window.__cmuxPerformDiffViewerNavigationAction = (action: string) => {
       const viewer = viewerRef.current;
+      if (action === "diffViewerScrollDown" || action === "diffViewerScrollUp") {
+        if (renderedRowNavigation.move(viewer, action === "diffViewerScrollDown" ? 1 : -1)) {
+          return true;
+        }
+      }
       if (viewer && CmuxViewerNavigation.performAction(action, viewer)) {
         return true;
       }
@@ -1951,6 +2312,14 @@ function useNativeViewerNavigation(
           if (viewer) CmuxViewerNavigation.resetSmoothTarget(viewer);
           onJumpAdjacentFile(-1);
           return true;
+        case "diffViewerNextHunk":
+          if (viewer) CmuxViewerNavigation.resetSmoothTarget(viewer);
+          return onNavigateHunk(1);
+        case "diffViewerPreviousHunk":
+          if (viewer) CmuxViewerNavigation.resetSmoothTarget(viewer);
+          return onNavigateHunk(-1);
+        case "diffViewerComment":
+          return renderedRowNavigation.comment(viewer);
       }
       return false;
     };
@@ -1964,9 +2333,46 @@ function useNativeViewerNavigation(
       delete window.__cmuxPerformDiffViewerNavigationAction;
       delete document.documentElement.dataset.cmuxViewerNavigationReady;
       document.dispatchEvent(new window.Event("cmux-diff-viewer-navigation-readiness-change"));
+      document.removeEventListener("cmux-diff-viewer-rendered-row-selected", onRenderedRowSelected);
       disposeManualInputReset();
     };
-  }, [dispatch, onJumpAdjacentFile, viewerRef]);
+  }, [dispatch, onComment, onJumpAdjacentFile, onMoveRow, onNavigateHunk, viewerRef]);
+}
+
+function useOpenFullFileHunk(
+  layout: DiffViewerLayout,
+  items: readonly DiffItem[],
+  metrics: StreamMetrics | null,
+  requestedHunk: unknown,
+  codeViewRef: React.MutableRefObject<CodeViewHandle<any> | null>,
+  cursorRef: React.MutableRefObject<ReviewCursor | null>,
+  openedRef: React.MutableRefObject<boolean>,
+  dispatch: React.Dispatch<AppAction>,
+  treeSource: FileTreeSource | null,
+): void {
+  useEffect(() => {
+    if (layout !== "full") openedRef.current = false;
+  }, [layout, openedRef]);
+  useEffect(() => {
+    if (layout !== "full" || openedRef.current || items.length === 0) return;
+    const requested = requestedReviewHunk(items, requestedHunk);
+    const hunk = requested ?? reviewHunks(items)[0];
+    // A requested hunk may be in a later streamed file. Wait for it rather
+    // than incorrectly opening the first hunk before streaming completes.
+    if (hunk == null || (requestedHunk != null && requested == null && !metrics?.completedAt)) return;
+    if (hunk == null) return;
+    openedRef.current = true;
+    cursorRef.current = cursorForHunk(hunk);
+    codeViewRef.current?.scrollTo({
+      type: "line",
+      id: hunk.itemId,
+      lineNumber: hunk.lineNumber,
+      side: hunk.side,
+      align: "center",
+      behavior: "instant",
+    });
+    dispatch({ type: "set-active-item", itemId: hunk.itemId, treePath: treeSource?.treePathByItemId.get(hunk.itemId) });
+  }, [codeViewRef, cursorRef, dispatch, items, layout, metrics?.completedAt, openedRef, requestedHunk, treeSource]);
 }
 
 function useOptionsDismiss(optionsOpen: boolean, dispatch: React.Dispatch<AppAction>) {

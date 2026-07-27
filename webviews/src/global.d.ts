@@ -17,8 +17,14 @@ declare global {
       target: Document | HTMLElement;
       getScroller: () => HTMLElement;
     }): () => void;
+    hasPendingRenderedRowMove?(scroller: HTMLElement | null): boolean;
     performAction(action: string, scroller: HTMLElement): boolean;
+    refreshRenderedRows?(scroller: HTMLElement | null): boolean;
     resetSmoothTarget(scroller: HTMLElement): void;
+    moveRenderedRow?(scroller: HTMLElement | null, direction: -1 | 1):
+      | { itemId?: string; lineNumber: number; side: "additions" | "deletions" }
+      | { pending: true }
+      | false;
   };
 
   interface Window {

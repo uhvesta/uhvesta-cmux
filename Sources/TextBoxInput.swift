@@ -2685,12 +2685,14 @@ struct TextBoxInputContainer: View {
     }
 
     private func dismissPendingComments() {
-        guard let workspaceId = surface.owningWorkspace()?.id else { return }
+        guard let workspace = surface.owningWorkspace() else { return }
+        let workspaceId = workspace.id
+        let commentStore = DiffCommentStore.shared.workspaceStore(for: workspace.stableId)
         let dismissed = DiffCommentSubmissionPool.shared.consumeAll(workspaceId: workspaceId)
         // Mark consumed so viewer reloads do not resurrect the chip; the
         // comments stay saved in the diff viewer.
-        for (repoRoot, entries) in Dictionary(grouping: dismissed, by: \.repoRoot) {
-            DiffCommentStore.shared.markConsumed(ids: entries.map(\.commentId), repoRoot: repoRoot)
+        for (repoRoot, targets) in Dictionary(grouping: dismissed.flatMap(\.consumptionTargets), by: \.repoRoot) {
+            commentStore.markConsumed(ids: targets.map(\.commentId), repoRoot: repoRoot)
         }
     }
 
@@ -2714,7 +2716,11 @@ struct TextBoxInputContainer: View {
         }
         let submittedParts = textView?.submissionParts()
             ?? [TextBoxSubmissionPart.text(text.trimmingCharacters(in: .newlines))]
-        let poolWorkspaceId = surface.owningWorkspace()?.id
+        let owningWorkspace = surface.owningWorkspace()
+        let poolWorkspaceId = owningWorkspace?.id
+        let commentStore = owningWorkspace.map {
+            DiffCommentStore.shared.workspaceStore(for: $0.stableId)
+        }
         let hasTypedContent = TextBoxSubmissionFormatter.hasSubmittableContent(submittedParts)
         guard hasTypedContent || pendingCommentCount > 0 else {
             NSSound.beep()
@@ -2811,8 +2817,8 @@ struct TextBoxInputContainer: View {
                 return
             }
             if !pendingComments.isEmpty {
-                for (repoRoot, entries) in Dictionary(grouping: pendingComments, by: \.repoRoot) {
-                    DiffCommentStore.shared.markConsumed(ids: entries.map(\.commentId), repoRoot: repoRoot)
+                for (repoRoot, targets) in Dictionary(grouping: pendingComments.flatMap(\.consumptionTargets), by: \.repoRoot) {
+                    commentStore?.markConsumed(ids: targets.map(\.commentId), repoRoot: repoRoot)
                 }
             }
             resetPanelSubmitActionAfterSuccessfulSubmit(submittedAction: launchAction)

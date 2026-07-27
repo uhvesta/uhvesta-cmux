@@ -61,7 +61,10 @@ public enum AutoNamingAgentCatalog {
         .init(slug: "antigravity", displayName: "Antigravity", summarizerSupported: false),
         .init(slug: "rovodev", displayName: "Rovo Dev", summarizerSupported: false),
         .init(slug: "hermes-agent", displayName: "Hermes Agent", summarizerSupported: false),
-        .init(slug: "copilot", displayName: "Copilot", summarizerSupported: false),
+        // Copilot is launchable and managed through its CLI/ACP integration.
+        // It remains outside the auto-naming group until the CLI has a safe,
+        // documented noninteractive title-generation invocation.
+        .init(slug: "copilot", displayName: "GitHub Copilot", summarizerSupported: false),
         .init(slug: "codebuddy", displayName: "CodeBuddy", summarizerSupported: false),
         .init(slug: "factory", displayName: "Factory", summarizerSupported: false),
         .init(slug: "qoder", displayName: "Qoder", summarizerSupported: false),

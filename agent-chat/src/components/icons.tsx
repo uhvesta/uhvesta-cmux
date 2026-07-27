@@ -4,6 +4,7 @@ const PROVIDER_COLOR: Record<string, string> = {
   claude: "#d97757",
   codex: "#10a37f",
   opencode: "#f2a600",
+  copilot: "#8b5cf6",
   pi: "#8b7cff",
   gemini: "#4285f4",
 };
@@ -56,6 +57,13 @@ function DrawnProviderIcon({ id }: { id: string }) {
       <svg className="provider-icon" viewBox="0 0 16 16" style={{ color }}>
         <rect x="2.2" y="3" width="11.6" height="10" rx="2" fill="none" stroke="currentColor" strokeWidth="1.25" />
         <path d="M4.6 6.1l2 1.9-2 1.9M7.9 10.1h3.1" fill="none" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    );
+  }
+  if (id === "copilot") {
+    return (
+      <svg className="provider-icon" viewBox="0 0 16 16" style={{ color }}>
+        <path d="M4.2 5.2c.8-1.3 2.1-2 3.8-2s3 .7 3.8 2M3.1 7.2c.5 3.3 2.1 5 4.9 5s4.4-1.7 4.9-5M5 8.2v.1M11 8.2v.1" fill="none" stroke="currentColor" strokeWidth="1.35" strokeLinecap="round" />
       </svg>
     );
   }

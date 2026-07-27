@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import CMUXMobileCore
 import CmuxWorkspaces
 import CmuxSettings
@@ -196,6 +197,65 @@ final class HostSettingsActions: SettingsHostActions {
     func setMenuBarOnly(_ enabled: Bool) -> Bool {
         MenuBarOnlySettings.setEnabled(enabled)
         return true
+    }
+
+    func currentWorkspaceDiffBranchBaseRef() -> String? {
+        guard let workspace = AppDelegate.shared?.tabManager?.selectedWorkspace else { return nil }
+        let settings = DiffBaseRefSettings()
+        return settings.workspaceBaseRef(
+            stableWorkspaceId: workspace.stableId.uuidString,
+            runtimeWorkspaceId: workspace.id.uuidString
+        )
+    }
+
+    func setCurrentWorkspaceDiffBranchBaseRef(_ value: String?) {
+        guard let workspace = AppDelegate.shared?.tabManager?.selectedWorkspace else { return }
+        DiffBaseRefSettings().setWorkspaceBaseRef(
+            value,
+            stableWorkspaceId: workspace.stableId.uuidString,
+            runtimeWorkspaceId: workspace.id.uuidString
+        )
+    }
+
+    func selectedWorkspaceDiffBranchBaseRefID() -> String? {
+        AppDelegate.shared?.tabManager?.selectedWorkspace?.stableId.uuidString
+    }
+
+    func selectedWorkspaceDiffBranchBaseRefIDUpdates() -> AsyncStream<String?> {
+        guard let tabManager = AppDelegate.shared?.tabManager else {
+            return AsyncStream { $0.finish() }
+        }
+        return AsyncStream { [weak tabManager] continuation in
+            guard let tabManager else {
+                continuation.finish()
+                return
+            }
+            let stableID = { (workspaceID: UUID?) in
+                workspaceID.flatMap { id in
+                    tabManager.tabs.first(where: { $0.id == id })?.stableId.uuidString
+                }
+            }
+            continuation.yield(stableID(tabManager.selectedTabId))
+            let cancellable = tabManager.selectedTabIdPublisher.sink { workspaceID in
+                continuation.yield(stableID(workspaceID))
+            }
+            continuation.onTermination = { _ in cancellable.cancel() }
+        }
+    }
+
+    func workspaceDiffBranchBaseRef(workspaceID: String) -> String? {
+        DiffBaseRefSettings().workspaceBaseRef(
+            stableWorkspaceId: workspaceID,
+            runtimeWorkspaceId: nil
+        )
+    }
+
+    func setWorkspaceDiffBranchBaseRef(_ value: String?, workspaceID: String) {
+        DiffBaseRefSettings().setWorkspaceBaseRef(
+            value,
+            stableWorkspaceId: workspaceID,
+            runtimeWorkspaceId: nil
+        )
     }
 
     func openMobilePairingWindow() {

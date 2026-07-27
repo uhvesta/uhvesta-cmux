@@ -39,6 +39,7 @@ extension Array where Element == CuratedSettingEntry {
             .init(section: .app, id: "focus-pane-first-click", title: "Focus Pane on First Click", synonyms: "app.focusPaneOnFirstClick click to focus focus follows mouse first click mouse activation"),
             .init(section: .app, id: "file-drops", title: "File Drops", synonyms: "drag drop files finder path text terminal editor split preview shift"),
             .init(section: .app, id: "preferred-editor", title: "Open Files With", synonyms: "app.preferredEditor editor open file code vscode visual studio zed sublime subl cursor"),
+            .init(section: .app, id: "diff-viewer-branch-base", title: String(localized: "settings.app.diffViewerBranchBaseRef", defaultValue: "Default Branch Diff Base"), paths: ["app.diffViewerBranchBaseRef"], synonyms: "diff branch base ref origin main master upstream review comparison"),
             .init(section: .app, id: "supported-file-previews", title: "Open Supported Files in cmux", synonyms: "app.openSupportedFilesInCmux cmd click file preview pdf image video audio quicklook quick look editor external"),
             .init(section: .app, id: "markdown-viewer", title: "Open Markdown in cmux Viewer", synonyms: "app.openMarkdownInCmuxViewer md markdown mdx viewer preview readme"),
             .init(section: .app, id: "file-editor-word-wrap", title: "File Editor Word Wrap", synonyms: "fileEditor.wordWrap file editor word wrap soft wrap reflow lines text horizontal scroll preview"),

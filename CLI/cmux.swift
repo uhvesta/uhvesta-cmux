@@ -3359,6 +3359,7 @@ struct CMUXCLI {
         }
         if command == "open" { try runOpenCommand(commandArgs: commandArgs, socketPath: resolvedSocketPath, explicitPassword: socketPasswordArg, jsonOutput: jsonOutput, idFormat: try resolvedIDFormat(jsonOutput: jsonOutput, raw: idFormatArg)); return }
         if command == "diff" { try runDiffCommand(commandArgs: commandArgs, socketPath: resolvedSocketPath, explicitPassword: socketPasswordArg, jsonOutput: jsonOutput, idFormat: try resolvedIDFormat(jsonOutput: jsonOutput, raw: idFormatArg)); return }
+        if command == "review-companion" { try runReviewCompanionCommand(commandArgs: commandArgs); return }
         if command == "restore-session" {
             try runRestoreSession(
                 commandArgs: commandArgs,
@@ -16837,6 +16838,8 @@ struct CMUXCLI {
             return "Legacy alias for 'cmux browser is-webview-focused'. Run 'cmux browser --help' for details."
         case "open": return openSubcommandUsage()
         case "diff": return diffSubcommandUsage()
+        case "review-companion":
+            return "Usage: cmux review-companion --root <absolute-path> [--source <unstaged|staged|branch>] [--base <ref>]\n\nWrites one aggregate-review JSON manifest to stdout. Intended for on-demand SSH use."
         case "markdown":
             return """
             Usage: cmux markdown open <path> [options]
@@ -35052,7 +35055,8 @@ export default CMUXSessionRestore;
           agent-hibernation <on|off>
           restore-session
           open <path-or-url>... [--workspace <id|ref|index>] [--surface <id|ref|index>] [--pane <id|ref|index>] [--window <id|ref|index>] [--focus <true|false>] [--no-focus]
-          diff [patch-file|-] [--source <unstaged|staged|branch|last-turn>] [--unstaged|--staged|--branch|--last-turn] [--workspace <id|ref|index>] [--surface <id|ref|index>] [--window <id|ref|index>] [--cwd <path>] [--base <ref>] [--focus <true|false>] [--no-focus] [--title <text>] [--layout <split|unified>] [--font-size <points>]
+          diff [patch-file|-] [--aggregate] [--ssh <host:/absolute/root>] [--remote-path <path>] [--remote-cmux <command>] [--source <unstaged|staged|branch|last-turn>] [--unstaged|--staged|--branch|--last-turn] [--workspace <id|ref|index>] [--surface <id|ref|index>] [--window <id|ref|index>] [--cwd <path>] [--base <ref>] [--focus <true|false>] [--no-focus] [--title <text>] [--layout <split|unified|full>] [--font-size <points>]
+          review-companion --root <absolute-path> [--source <unstaged|staged|branch>] [--base <ref>]
           feedback [--email <email> --body <text> [--image <path> ...]]
           feed tui|clear
           themes [list|set|clear]
@@ -35173,7 +35177,7 @@ export default CMUXSessionRestore;
           display-message [-p|--print] <text>
 
           markdown [open] <path> [--focus <true|false>] (open markdown file in formatted viewer panel with live reload)
-          diff [patch-file|-] [--source <unstaged|staged|branch|last-turn>] [--cwd <path>] [--base <ref>] [--focus <true|false>] [--no-focus] [--title <text>] [--layout <split|unified>] [--font-size <points>] (open patch input or git source in a browser split)
+          diff [patch-file|-] [--aggregate] [--ssh <host:/absolute/root>] [--remote-path <path>] [--remote-cmux <command>] [--source <unstaged|staged|branch|last-turn>] [--cwd <path>] [--base <ref>] [--focus <true|false>] [--no-focus] [--title <text>] [--layout <split|unified|full>] [--font-size <points>] (open patch input or git source in a browser split)
 
           browser [--surface <id|ref|index> | <surface>] <subcommand> ...
           browser disable | enable | status

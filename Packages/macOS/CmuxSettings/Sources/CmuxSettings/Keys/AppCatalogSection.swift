@@ -76,6 +76,14 @@ public struct AppCatalogSection: SettingCatalogSection {
         userDefaultsKey: "preferredEditorCommand"
     )
 
+    /// Optional global branch-diff base ref. Empty means the existing smart
+    /// detection chain chooses the base.
+    public let diffViewerBranchBaseRef = DefaultsKey<String>(
+        id: "app.diffViewerBranchBaseRef",
+        defaultValue: "",
+        userDefaultsKey: "diffViewer.branchBaseRef"
+    )
+
     public let openSupportedFilesInCmux = DefaultsKey<Bool>(
         id: "app.openSupportedFilesInCmux",
         defaultValue: true,

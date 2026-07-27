@@ -436,6 +436,11 @@ export const shortcutCategories: ShortcutCategory[] = [
         description: { en: "Open diff viewer", ja: "差分ビューアを開く" },
       },
       {
+        id: "openReviewTab",
+        combos: [["⌃", "⌘", "⇧", "R"]],
+        description: { en: "Open aggregate review tab", ja: "集約レビュータブを開く" },
+      },
+      {
         id: "diffViewerScrollDown",
         combos: [["J"]],
         description: { en: "Scroll viewer down one smooth step", ja: "ビューアを1ステップ下へ滑らかにスクロール" },
@@ -503,6 +508,24 @@ export const shortcutCategories: ShortcutCategory[] = [
         description: { en: "Jump to previous diff file", ja: "前の差分ファイルへ移動" },
         note: { en: "focused diff viewer", ja: "フォーカス中の差分ビューア" },
         configValue: '["[", "f"]]',
+      },
+      {
+        id: "diffViewerNextHunk",
+        combos: [["L"]],
+        description: { en: "Jump to next diff hunk", ja: "次の差分ハンクへ移動" },
+        note: { en: "focused diff viewer", ja: "フォーカス中の差分ビューア" },
+      },
+      {
+        id: "diffViewerPreviousHunk",
+        combos: [["H"]],
+        description: { en: "Jump to previous diff hunk", ja: "前の差分ハンクへ移動" },
+        note: { en: "focused diff viewer", ja: "フォーカス中の差分ビューア" },
+      },
+      {
+        id: "diffViewerComment",
+        combos: [["C"]],
+        description: { en: "Add or edit a diff comment", ja: "差分コメントを追加または編集" },
+        note: { en: "focused diff viewer", ja: "フォーカス中の差分ビューア" },
       },
     ],
   },

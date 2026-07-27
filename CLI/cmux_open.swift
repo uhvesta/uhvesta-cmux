@@ -1,4 +1,5 @@
 import CryptoKit
+import CmuxSettings
 import Darwin
 import Foundation
 
@@ -162,6 +163,13 @@ extension CMUXCLI {
         var fontSize: String?
         var cwd: String?
         var branchBase: String?
+        var aggregate = false
+        var remoteTarget: String?
+        var remotePath: String?
+        var remoteCompanionExecutable: String?
+        var requestedHunk: String?
+        var requestedHunkFile: String?
+        var requestedHunkRepo: String?
         var sessionId: String?
         var source: DiffSource?
         var inputs: [String] = []
@@ -175,6 +183,7 @@ extension CMUXCLI {
         var emptyMessage: String?
         var externalURL: String?
         var remotePatchURL: URL? = nil
+        var aggregateManifest: DiffReviewAggregateManifest? = nil
     }
 
     struct EmptyDiffSourceError: Error {
@@ -183,10 +192,15 @@ extension CMUXCLI {
 
     struct DiffSourceContext {
         var workspaceId: String?
+        var workspaceStableId: String?
         var surfaceId: String?
         var sessionId: String?
         var repoRoot: String?
         var branchBaseRef: String?
+        var aggregateRoot: String?
+        var aggregateSource: DiffSource?
+        var remoteReviewTarget: DiffRemoteReviewTarget? = nil
+        var requestedHunk: [String: Any]? = nil
     }
 
     struct DiffViewerWriteResult {
@@ -545,7 +559,9 @@ extension CMUXCLI {
                 "collapseUnchangedContext": CMUXDiffViewerLocalization.string("diffViewer.collapseUnchangedContext", defaultValue: "Collapse unchanged context"),
                 "copyFailedGitApplyCommand": CMUXDiffViewerLocalization.string("diffViewer.copyFailedGitApplyCommand", defaultValue: "Could not copy git apply command."),
                 "copiedGitApplyCommand": CMUXDiffViewerLocalization.string("diffViewer.copiedGitApplyCommand", defaultValue: "Copied git apply command"),
+                "copiedReviewPrompt": CMUXDiffViewerLocalization.string("diffViewer.copiedReviewPrompt", defaultValue: "Copied review prompt"),
                 "copyGitApplyCommand": CMUXDiffViewerLocalization.string("diffViewer.copyGitApplyCommand", defaultValue: "Copy git apply command"),
+                "copyReviewPrompt": CMUXDiffViewerLocalization.string("diffViewer.copyReviewPrompt", defaultValue: "Copy review prompt"),
                 "deletions": CMUXDiffViewerLocalization.string("diffViewer.deletions", defaultValue: "Deletions"),
                 "diffStats": CMUXDiffViewerLocalization.string("diffViewer.diffStats", defaultValue: "Diff stats"),
                 "diffTarget": CMUXDiffViewerLocalization.string("diffViewer.diffTarget", defaultValue: "Diff target"),
@@ -557,6 +573,7 @@ extension CMUXCLI {
                 "enableWordWrap": CMUXDiffViewerLocalization.string("diffViewer.enableWordWrap", defaultValue: "Enable word wrap"),
                 "expandAllDiffs": CMUXDiffViewerLocalization.string("diffViewer.expandAllDiffs", defaultValue: "Expand all diffs"),
                 "expandUnchangedContext": CMUXDiffViewerLocalization.string("diffViewer.expandUnchangedContext", defaultValue: "Expand unchanged context"),
+                "fullFile": CMUXDiffViewerLocalization.string("diffViewer.fullFile", defaultValue: "Full File"),
                 "files": CMUXDiffViewerLocalization.string("diffViewer.files", defaultValue: "Files"),
                 "hideBackgrounds": CMUXDiffViewerLocalization.string("diffViewer.hideBackgrounds", defaultValue: "Hide backgrounds"),
                 "hideFiles": CMUXDiffViewerLocalization.string("diffViewer.hideFiles", defaultValue: "Hide files"),
@@ -573,6 +590,7 @@ extension CMUXCLI {
                 "options": CMUXDiffViewerLocalization.string("diffViewer.options", defaultValue: "Options"),
                 "parsingDiff": CMUXDiffViewerLocalization.string("diffViewer.parsingDiff", defaultValue: "Parsing diff..."),
                 "refresh": CMUXDiffViewerLocalization.string("diffViewer.refresh", defaultValue: "Refresh"),
+                "repository": CMUXDiffViewerLocalization.string("diffViewer.repository", defaultValue: "Repository"),
                 "renderingDiff": CMUXDiffViewerLocalization.string("diffViewer.renderingDiff", defaultValue: "Rendering diff..."),
                 "repoPath": CMUXDiffViewerLocalization.string("diffViewer.repoPath", defaultValue: "Repository path"),
                 "branchBase": CMUXDiffViewerLocalization.string("diffViewer.branchBase", defaultValue: "Branch base"),
@@ -597,6 +615,10 @@ extension CMUXCLI {
                 "showFiles": CMUXDiffViewerLocalization.string("diffViewer.showFiles", defaultValue: "Show files"),
                 "showFileSearch": CMUXDiffViewerLocalization.string("diffViewer.showFileSearch", defaultValue: "Show file search"),
                 "showLineNumbers": CMUXDiffViewerLocalization.string("diffViewer.showLineNumbers", defaultValue: "Show line numbers"),
+                "queuedReviewPrompt": CMUXDiffViewerLocalization.string("diffViewer.queuedReviewPrompt", defaultValue: "Review prompt queued for the next terminal submission"),
+                "sendReviewPrompt": CMUXDiffViewerLocalization.string("diffViewer.sendReviewPrompt", defaultValue: "Send review prompt to terminal"),
+                "sendReviewPromptFailed": CMUXDiffViewerLocalization.string("diffViewer.sendReviewPromptFailed", defaultValue: "Could not queue review prompt"),
+                "switchToFullFile": CMUXDiffViewerLocalization.string("diffViewer.switchToFullFile", defaultValue: "Switch to Full File"),
                 "switchToSplitDiff": CMUXDiffViewerLocalization.string("diffViewer.switchToSplitDiff", defaultValue: "Switch to split diff"),
                 "switchToUnifiedDiff": CMUXDiffViewerLocalization.string("diffViewer.switchToUnifiedDiff", defaultValue: "Switch to unified diff"),
                 "untitled": CMUXDiffViewerLocalization.string("diffViewer.untitled", defaultValue: "Untitled"),
@@ -967,13 +989,23 @@ extension CMUXCLI {
 
         var diffSourceContext = DiffSourceContext(
             workspaceId: nil,
+            workspaceStableId: nil,
             surfaceId: nil,
             sessionId: parsedArgs.sessionId,
             repoRoot: nil,
-            branchBaseRef: parsedArgs.branchBase
+            branchBaseRef: parsedArgs.branchBase,
+            aggregateRoot: nil,
+            aggregateSource: nil,
+            remoteReviewTarget: nil
         )
         if let cwd = parsedArgs.cwd {
-            diffSourceContext.repoRoot = try gitRepoRoot(startingAt: resolvePath(cwd))
+            let resolvedCwd = resolvePath(cwd)
+            if parsedArgs.aggregate {
+                diffSourceContext.aggregateRoot = resolvedCwd
+                diffSourceContext.repoRoot = resolvedCwd
+            } else {
+                diffSourceContext.repoRoot = try gitRepoRoot(startingAt: resolvedCwd)
+            }
         } else if parsedArgs.source == nil {
             // Piped patches get a best-effort repo root from the CLI's cwd so
             // diff comments can persist per repository.
@@ -996,6 +1028,52 @@ extension CMUXCLI {
             workspaceHandle = sourceContext.workspaceId ?? workspaceHandle
             surfaceHandle = sourceContext.surfaceId ?? surfaceHandle
         }
+        if parsedArgs.aggregate {
+            guard parsedArgs.source == nil || parsedArgs.source == .unstaged || parsedArgs.source == .staged || parsedArgs.source == .branch else {
+                throw CLIError(message: "--aggregate supports unstaged, staged, or branch review sources")
+            }
+            let root = diffSourceContext.aggregateRoot
+                ?? resolvePath(parsedArgs.cwd ?? FileManager.default.currentDirectoryPath)
+            diffSourceContext.aggregateRoot = root
+            diffSourceContext.repoRoot = root
+            diffSourceContext.aggregateSource = parsedArgs.source ?? .unstaged
+        }
+        if let remoteTarget = parsedArgs.remoteTarget {
+            guard parsedArgs.inputs.isEmpty else {
+                throw CLIError(message: "Remote review does not accept a local patch input")
+            }
+            guard parsedArgs.source == nil || parsedArgs.source == .unstaged || parsedArgs.source == .staged || parsedArgs.source == .branch else {
+                throw CLIError(message: "Remote review supports unstaged, staged, or branch sources")
+            }
+            let target = try remoteReviewTarget(
+                destination: remoteTarget,
+                remotePath: parsedArgs.remotePath ?? parsedArgs.cwd,
+                companionExecutable: parsedArgs.remoteCompanionExecutable
+            )
+            diffSourceContext.remoteReviewTarget = target
+            diffSourceContext.aggregateRoot = target.root
+            diffSourceContext.repoRoot = "ssh://\(target.destination)\(target.root)"
+            diffSourceContext.aggregateSource = parsedArgs.source ?? .unstaged
+        }
+        if diffSourceContext.branchBaseRef == nil {
+            diffSourceContext.branchBaseRef = DiffBaseRefSettings().resolvedBaseRef(
+                stableWorkspaceId: diffSourceContext.workspaceStableId,
+                runtimeWorkspaceId: diffSourceContext.workspaceId
+            )
+        }
+        if let rawHunk = parsedArgs.requestedHunk {
+            guard let hunk = Int(rawHunk), hunk > 0 else {
+                throw CLIError(message: "--hunk must be a positive one-based number")
+            }
+            var request: [String: Any] = ["hunk": hunk]
+            if let file = parsedArgs.requestedHunkFile, !file.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                request["file"] = file
+            }
+            if let repo = parsedArgs.requestedHunkRepo, !repo.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                request["repoRoot"] = repo
+            }
+            diffSourceContext.requestedHunk = request
+        }
 
         let appearance = diffViewerAppearance(
             socketPath: socketPath,
@@ -1004,7 +1082,7 @@ extension CMUXCLI {
         let runtime = diffViewerRuntime(socketPath: socketPath)
         let viewer = try writeDiffViewer(
             rawInput: parsedArgs.inputs.first,
-            source: parsedArgs.source,
+            source: parsedArgs.aggregate ? nil : parsedArgs.source,
             titleOverride: parsedArgs.title,
             layout: layout,
             layoutSource: layoutSource,
@@ -1125,13 +1203,34 @@ extension CMUXCLI {
             windowHandle: windowHandle,
             client: client
         )
+        let workspaceStableId = canonicalDiffWorkspaceStableId(
+            workspaceId,
+            windowHandle: windowHandle,
+            client: client
+        )
         let surfaceId = try canonicalDiffSurfaceId(
             surfaceHandle,
             workspaceId: workspaceId,
             windowHandle: windowHandle,
             client: client
         )
-        return DiffSourceContext(workspaceId: workspaceId, surfaceId: surfaceId, sessionId: nil, repoRoot: nil, branchBaseRef: nil)
+        return DiffSourceContext(workspaceId: workspaceId, workspaceStableId: workspaceStableId, surfaceId: surfaceId, sessionId: nil, repoRoot: nil, branchBaseRef: nil)
+    }
+
+    private func canonicalDiffWorkspaceStableId(
+        _ workspaceId: String?,
+        windowHandle: String?,
+        client: SocketClient
+    ) -> String? {
+        guard let workspaceId = normalizedDiffSourceValue(workspaceId) else { return nil }
+        var params: [String: Any] = ["workspace_id": workspaceId]
+        if let windowHandle { params["window_id"] = windowHandle }
+        guard let response = try? client.sendV2(method: "workspace.list", params: params),
+			let workspace = (response["workspaces"] as? [[String: Any]])?.first,
+              let stableId = workspace["stable_id"] as? String else {
+            return nil
+        }
+        return normalizedDiffSourceValue(stableId)
     }
 
     private func canonicalDiffWorkspaceId(
@@ -1347,6 +1446,36 @@ extension CMUXCLI {
                     parsed.branchBase = try openOptionValue(commandArgs, index: index, name: arg)
                     index += 2
                     continue
+                case "--hunk":
+                    parsed.requestedHunk = try openOptionValue(commandArgs, index: index, name: arg)
+                    index += 2
+                    continue
+                case "--hunk-file":
+                    parsed.requestedHunkFile = try openOptionValue(commandArgs, index: index, name: arg)
+                    index += 2
+                    continue
+                case "--hunk-repo":
+                    parsed.requestedHunkRepo = try openOptionValue(commandArgs, index: index, name: arg)
+                    index += 2
+                    continue
+                case "--aggregate", "--review-root":
+                    parsed.aggregate = true
+                    index += 1
+                    continue
+                case "--ssh", "--remote":
+                    parsed.remoteTarget = try openOptionValue(commandArgs, index: index, name: arg)
+                    parsed.aggregate = true
+                    index += 2
+                    continue
+                case "--remote-path":
+                    parsed.remotePath = try openOptionValue(commandArgs, index: index, name: arg)
+                    parsed.aggregate = true
+                    index += 2
+                    continue
+                case "--remote-cmux":
+                    parsed.remoteCompanionExecutable = try openOptionValue(commandArgs, index: index, name: arg)
+                    index += 2
+                    continue
                 case "--source":
                     let rawSource = try openOptionValue(commandArgs, index: index, name: arg)
                     guard let source = DiffSource(rawValue: rawSource) else {
@@ -1373,7 +1502,7 @@ extension CMUXCLI {
                     continue
                 default:
                     if arg.hasPrefix("-"), arg != "-" {
-                        throw CLIError(message: "diff: unknown flag '\(arg)'. Usage: cmux diff [patch-file|-] [--source <unstaged|staged|branch|last-turn>] [--workspace <id|ref|index>] [--surface <id|ref|index>] [--window <id|ref|index>] [--session <id>] [--cwd <path>] [--base <ref>] [--focus true|false] [--no-focus] [--title <text>] [--layout split|unified] [--font-size <points>]")
+                        throw CLIError(message: "diff: unknown flag '\(arg)'. Usage: cmux diff [patch-file|-] [--aggregate] [--ssh host:/absolute/root] [--remote-path <path>] [--remote-cmux <command>] [--source <unstaged|staged|branch|last-turn>] [--workspace <id|ref|index>] [--surface <id|ref|index>] [--window <id|ref|index>] [--session <id>] [--cwd <path>] [--base <ref>] [--focus true|false] [--no-focus] [--title <text>] [--layout split|unified|full] [--font-size <points>]")
                     }
                 }
             }
@@ -1410,7 +1539,7 @@ extension CMUXCLI {
 
     private func resolveDiffViewerLayout(rawLayout: String?) throws -> (layout: String, source: String) {
         if let rawLayout {
-            return (try parseDiffViewerLayout(rawLayout, errorMessage: "--layout must be split|unified"), "explicit")
+            return (try parseDiffViewerLayout(rawLayout, errorMessage: "--layout must be split|unified|full"), "explicit")
         }
         return (diffViewerDefaultLayoutSetting() ?? "unified", "default")
     }
@@ -1419,7 +1548,7 @@ extension CMUXCLI {
         let normalized = rawValue
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
-        guard normalized == "split" || normalized == "unified" else {
+        guard normalized == "split" || normalized == "unified" || normalized == "full" else {
             throw CLIError(message: errorMessage)
         }
         return normalized
@@ -1432,7 +1561,7 @@ extension CMUXCLI {
                   let rawLayout = section["defaultLayout"] as? String,
                   let layout = try? parseDiffViewerLayout(
                       rawLayout,
-                      errorMessage: "diffViewer.defaultLayout must be split|unified"
+                      errorMessage: "diffViewer.defaultLayout must be split|unified|full"
                   ) else {
                 continue
             }
@@ -1487,8 +1616,25 @@ extension CMUXCLI {
         source: DiffSource?,
         context: DiffSourceContext
     ) throws -> DiffInput {
+        if let remoteTarget = context.remoteReviewTarget {
+            return try remoteAggregateDiffInput(
+                target: remoteTarget,
+                source: context.aggregateSource ?? .unstaged,
+                baseRef: context.branchBaseRef
+            )
+        }
+
         if let source {
             return try readGitDiffInput(source: source, context: context)
+        }
+
+        if let aggregateRoot = context.aggregateRoot {
+            let aggregateSource = context.aggregateSource ?? (context.branchBaseRef == nil ? .unstaged : .branch)
+            return try aggregateDiffInput(
+                root: aggregateRoot,
+                source: aggregateSource,
+                baseRef: context.branchBaseRef
+            )
         }
 
         guard let rawInput, rawInput != "-" else {
@@ -1576,7 +1722,14 @@ extension CMUXCLI {
             patch = try gitStdout(gitDiffPatchArguments(["--cached", "--"]), in: repoRoot)
             sourceLabel = "git staged"
         case .branch:
-            let baseRef = try resolvedGitBranchDiffBaseRef(context.branchBaseRef, in: repoRoot)
+            let configuredBaseRef = DiffBaseRefSettings().resolvedBaseRef(
+                stableWorkspaceId: context.workspaceStableId,
+                runtimeWorkspaceId: context.workspaceId
+            )
+            let baseRef = try resolvedGitBranchDiffBaseRef(
+                context.branchBaseRef ?? configuredBaseRef,
+                in: repoRoot
+            )
             let mergeBase = try gitSingleLine(["merge-base", "HEAD", baseRef], in: repoRoot)
             patch = try gitStdout(gitDiffPatchArguments([mergeBase, "--"]), in: repoRoot)
             sourceLabel = "git branch \(baseRef)"
@@ -1807,7 +1960,7 @@ extension CMUXCLI {
         throw CLIError(message: "Couldn't find a branch diff base. Set an upstream branch or create origin/main.")
     }
 
-    private func resolvedGitBranchDiffBaseRef(_ rawBaseRef: String?, in repoRoot: String) throws -> String {
+    func resolvedGitBranchDiffBaseRef(_ rawBaseRef: String?, in repoRoot: String) throws -> String {
         guard let rawBaseRef,
               !rawBaseRef.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return try gitBranchDiffBaseRef(in: repoRoot)
@@ -2556,8 +2709,12 @@ extension CMUXCLI {
         return result.stdout
     }
 
+    /// Git's largest accepted context count makes generated review patches self-contained.
+    /// Pierre can then collapse or expand real unchanged regions without a separate file-content transport.
+    static let gitFullFileContextArgument = "--unified=2147483647"
+
     private func gitDiffPatchArguments(_ tail: [String]) -> [String] {
-        ["diff", "--no-ext-diff", "--no-color", "--binary"] + tail
+        ["diff", "--no-ext-diff", "--no-color", "--binary", Self.gitFullFileContextArgument] + tail
     }
 
     private func gitStdout(
@@ -3930,6 +4087,8 @@ extension CMUXCLI {
             appearance: appearance,
             sourceOptions: [],
             repoRoot: context.repoRoot,
+            aggregateManifest: input.aggregateManifest,
+            requestedHunk: context.requestedHunk,
             runtime: runtime
         )
         let assets = try ensureDiffViewerAssets(nextTo: viewerFileURL, runtime: runtime)
@@ -4157,6 +4316,10 @@ extension CMUXCLI {
         let requestedSource = selectedSource
         let repoRoot = try gitRepoRootForDiff(context)
         let explicitBranchBaseRef = normalizedDiffSourceValue(context.branchBaseRef)
+            ?? DiffBaseRefSettings().resolvedBaseRef(
+                stableWorkspaceId: context.workspaceStableId,
+                runtimeWorkspaceId: context.workspaceId
+            )
         var selectedSource = requestedSource
         let shouldDeferSelectedSource = requestedSource != .lastTurn
         // Smart branch base is the single source of truth for the rendered branch
@@ -4567,6 +4730,7 @@ extension CMUXCLI {
                 }
                 let pageContext = DiffSourceContext(
                     workspaceId: selectedContext.workspaceId,
+                    workspaceStableId: selectedContext.workspaceStableId,
                     surfaceId: selectedContext.surfaceId,
                     sessionId: selectedContext.sessionId,
                     repoRoot: option.repoRoot,
@@ -5433,6 +5597,7 @@ extension CMUXCLI {
 
         var context = DiffSourceContext(
             workspaceId: session.workspaceId,
+            workspaceStableId: nil,
             surfaceId: session.surfaceId,
             repoRoot: repoRoot,
             branchBaseRef: base
@@ -6274,6 +6439,7 @@ extension CMUXCLI {
 
         var context = DiffSourceContext(
             workspaceId: session.workspaceId,
+            workspaceStableId: nil,
             surfaceId: session.surfaceId,
             repoRoot: repoRoot,
             branchBaseRef: base
@@ -7265,6 +7431,8 @@ extension CMUXCLI {
         repoOptions: [DiffViewerSourceOption] = [],
         baseOptions: [DiffViewerSourceOption] = [],
         repoRoot: String? = nil,
+        aggregateManifest: DiffReviewAggregateManifest? = nil,
+        requestedHunk: [String: Any]? = nil,
         branchBaseRef: String? = nil,
         branchPicker: [String: Any]? = nil
     ) throws -> URL {
@@ -7287,6 +7455,8 @@ extension CMUXCLI {
             repoOptions: repoOptions,
             baseOptions: baseOptions,
             repoRoot: repoRoot,
+            aggregateManifest: aggregateManifest,
+            requestedHunk: requestedHunk,
             branchBaseRef: branchBaseRef,
             branchPicker: branchPicker
         )
@@ -7308,6 +7478,8 @@ extension CMUXCLI {
         repoOptions: [DiffViewerSourceOption] = [],
         baseOptions: [DiffViewerSourceOption] = [],
         repoRoot: String? = nil,
+        aggregateManifest: DiffReviewAggregateManifest? = nil,
+        requestedHunk: [String: Any]? = nil,
         branchBaseRef: String? = nil,
         branchPicker: [String: Any]? = nil,
         sessionSource: [String: Any]? = nil,
@@ -7392,6 +7564,8 @@ extension CMUXCLI {
         repoOptions: [DiffViewerSourceOption] = [],
         baseOptions: [DiffViewerSourceOption] = [],
         repoRoot: String? = nil,
+        aggregateManifest: DiffReviewAggregateManifest? = nil,
+        requestedHunk: [String: Any]? = nil,
         branchBaseRef: String? = nil,
         branchPicker: [String: Any]? = nil,
         sessionSource: [String: Any]? = nil,
@@ -7454,6 +7628,12 @@ extension CMUXCLI {
         }
         if let repoRoot {
             payload["repoRoot"] = repoRoot
+        }
+        if let aggregateManifest {
+            payload["aggregateManifest"] = aggregateManifest.jsonObject
+        }
+        if let requestedHunk {
+            payload["requestedHunk"] = requestedHunk
         }
         if let branchBaseRef {
             payload["branchBaseRef"] = branchBaseRef
@@ -7895,10 +8075,14 @@ extension CMUXCLI {
         """
         Usage: cmux diff [patch-file|-] [options]
 
-        Render a unified diff or patch in a cmux browser split.
+        Render a diff or patch in a cmux browser split.
         With no patch file or source, cmux diff reads piped stdin.
 
         Options:
+          --aggregate                   Review every leaf Git repository below --cwd
+          --ssh <host:/absolute/path>   Fetch an aggregate review from an on-demand remote cmux companion
+          --remote-path <path>          Absolute remote review root when --ssh names only a host
+          --remote-cmux <command>       Remote cmux executable or absolute path (default: cmux)
           --source <name>              Diff source: unstaged, staged, branch, last-turn
           --unstaged                   Show unstaged git changes
           --staged                     Show staged git changes
@@ -7910,10 +8094,13 @@ extension CMUXCLI {
           --window <id|ref|index>      Target window
           --cwd, --repo <path>          Git repository or worktree path for git sources
           --base <ref>                  Base ref for --branch (default: origin/HEAD or main)
+          --hunk <number>               Open a one-based hunk; scope with --hunk-file and --hunk-repo
+          --hunk-file <path>            Repository-relative file path for --hunk
+          --hunk-repo <root>            Repository root for --hunk in aggregate review
           --focus <true|false>         Focus the diff browser split (default: false)
           --no-focus                   Do not focus the opened diff browser split
           --title <text>               Set the diff viewer title to the provided text
-          --layout <split|unified>     Diff layout (default: unified; configurable via diffViewer.defaultLayout in cmux.json)
+          --layout <split|unified|full> Diff layout (default: unified; configurable via diffViewer.defaultLayout in cmux.json)
           --font-size <points>         Set diff font size (default: 10)
 
         Examples:
@@ -7923,6 +8110,8 @@ extension CMUXCLI {
           cmux diff --staged
           cmux diff --branch
           cmux diff --branch --base upstream/main --repo ../repo
+          cmux diff --aggregate --cwd ~/src
+          cmux diff --ssh build-host:/srv/src --branch --layout full
           cmux diff --last-turn
           cmux diff pr.patch --layout unified --font-size 15 --focus true
         """

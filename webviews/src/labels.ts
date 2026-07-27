@@ -27,6 +27,8 @@ const DEFAULT_DIFF_VIEWER_LABELS = {
   commit: "Commit",
   copyFailedGitApplyCommand: "Could not copy git apply command.",
   copiedGitApplyCommand: "Copied git apply command",
+  copiedReviewPrompt: "Copied review prompt",
+  copyReviewPrompt: "Copy review prompt",
   copyGitApplyCommand: "Copy git apply command",
   deletions: "Deletions",
   diffStats: "Diff stats",
@@ -38,6 +40,7 @@ const DEFAULT_DIFF_VIEWER_LABELS = {
   enableWordWrap: "Enable word wrap",
   expandAllDiffs: "Expand all diffs",
   expandUnchangedContext: "Expand unchanged context",
+  fullFile: "Full File",
   files: "Files",
   hideBackgrounds: "Hide backgrounds",
   hideFiles: "Hide files",
@@ -54,6 +57,7 @@ const DEFAULT_DIFF_VIEWER_LABELS = {
   options: "Options",
   parsingDiff: "Parsing diff...",
   refresh: "Refresh",
+  repository: "Repository",
   renderFailed: "Could not render this diff. Check the patch input and try again.",
   renderingDiff: "Rendering diff...",
   repoPath: "Repository path",
@@ -62,9 +66,41 @@ const DEFAULT_DIFF_VIEWER_LABELS = {
   showFileSearch: "Show file search",
   showLineNumbers: "Show line numbers",
   switchToSplitDiff: "Switch to split diff",
+  switchToFullFile: "Switch to Full File",
   switchToUnifiedDiff: "Switch to unified diff",
+  queuedReviewPrompt: "Review prompt queued for the next terminal submission",
+  sendReviewPrompt: "Send review prompt to terminal",
+  sendReviewPromptFailed: "Could not queue review prompt",
   untitled: "Untitled",
 } as const;
+
+const JAPANESE_LOCAL_FALLBACKS: Partial<Record<keyof typeof DEFAULT_DIFF_VIEWER_LABELS, string>> = {
+  copiedReviewPrompt: "レビュー用プロンプトをコピーしました",
+  copyReviewPrompt: "レビュー用プロンプトをコピー",
+  fullFile: "ファイル全体",
+  queuedReviewPrompt: "次のターミナル送信にレビュー用プロンプトを追加しました",
+  sendReviewPrompt: "レビュー用プロンプトをターミナルへ送信",
+  sendReviewPromptFailed: "レビュー用プロンプトを追加できませんでした",
+  switchToFullFile: "ファイル全体表示に切り替え",
+};
+
+const LOCAL_FALLBACK_KEYS = new Set<keyof typeof DEFAULT_DIFF_VIEWER_LABELS>([
+  "copiedReviewPrompt",
+  "copyReviewPrompt",
+  "fullFile",
+  "queuedReviewPrompt",
+  "sendReviewPrompt",
+  "sendReviewPromptFailed",
+  "switchToFullFile",
+]);
+
+function localFallback(key: keyof typeof DEFAULT_DIFF_VIEWER_LABELS): string {
+  const locale = typeof navigator !== "undefined" && typeof navigator.language === "string"
+    ? navigator.language.toLowerCase()
+    : "";
+  if (locale.startsWith("ja")) return JAPANESE_LOCAL_FALLBACKS[key] ?? DEFAULT_DIFF_VIEWER_LABELS[key];
+  return DEFAULT_DIFF_VIEWER_LABELS[key];
+}
 
 export type DiffViewerLabelKey = keyof typeof DEFAULT_DIFF_VIEWER_LABELS;
 export type DiffViewerLabelResolver = (key: DiffViewerLabelKey) => string;
@@ -88,11 +124,15 @@ export function createDiffViewerLabelResolver(
       return localizedValue;
     }
 
+    if (LOCAL_FALLBACK_KEYS.has(key)) {
+      return localFallback(key);
+    }
+
     if (options.assertMissing && !missingKeys.has(key)) {
       missingKeys.add(key);
       throw new Error(`Missing cmux diff viewer label: ${key}`);
     }
 
-    return DEFAULT_DIFF_VIEWER_LABELS[key];
+    return localFallback(key);
   };
 }

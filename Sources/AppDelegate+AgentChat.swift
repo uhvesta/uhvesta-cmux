@@ -61,6 +61,27 @@ struct AgentChatServerAvailability: Sendable {
 }
 
 extension AppDelegate {
+    /// Returns a client for the review panel's one-turn Copilot route. App-owned
+    /// configurations always use the tokenized URL published by the sidecar,
+    /// never the untrusted legacy default URL.
+    func reviewQuestionSidecarClient(for workspace: Workspace) async -> ReviewQuestionSidecarClient? {
+        guard let context = mainWindowContexts.values.first(where: {
+            $0.tabManager.tabs.contains(where: { $0.id == workspace.id })
+        }) else {
+            return nil
+        }
+        let agentChat = context.cmuxConfigStore?.agentChat ?? .default
+        let availability = await ensureAgentChatServerAvailable(
+            agentChat,
+            globalConfigPath: context.cmuxConfigStore?.globalConfigPath,
+            preferredWindow: resolvedWindow(for: context)
+        )
+        guard availability.isReachable, let baseURL = availability.browserURL else {
+            return nil
+        }
+        return ReviewQuestionSidecarClient(baseURL: baseURL)
+    }
+
     /// Workstream feed title mapping extracted because `AppDelegate.swift`
     /// sits at its file-length budget.
     nonisolated static func feedWorkstreamTitle(for event: WorkstreamEvent) -> String? {

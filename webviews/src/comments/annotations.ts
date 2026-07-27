@@ -21,10 +21,11 @@ export function annotationsForItem(
   draft: CommentDraft | null,
 ): CommentAnnotation[] {
   const annotations: CommentAnnotation[] = [];
-  const path = item.fileDiff != null ? fileName(item.fileDiff, "") : "";
+  const path = item.commentFilePath ?? (item.fileDiff != null ? fileName(item.fileDiff, "") : "");
   if (path !== "") {
     for (const comment of comments) {
-      if (comment.filePath !== path) {
+      if (comment.parentId != null || comment.filePath !== path ||
+        (comment.repositoryRoot != null && item.commentRepoRoot != null && comment.repositoryRoot !== item.commentRepoRoot)) {
         continue;
       }
       const anchor = anchorComment(item.fileDiff, comment);
@@ -147,10 +148,11 @@ export function sidebarCommentEntries(
   comments: readonly DiffCommentRecord[],
   streamComplete = true,
 ): SidebarCommentEntry[] {
-  return comments.map((comment) => {
+  return comments.filter((comment) => comment.parentId == null).map((comment) => {
     let fallback: { itemId: string; anchor: AnchorResult } | null = null;
     for (const item of items) {
-      if (item.fileDiff == null || fileName(item.fileDiff, "") !== comment.filePath) {
+      if (item.fileDiff == null || (item.commentFilePath ?? fileName(item.fileDiff, "")) !== comment.filePath ||
+        (comment.repositoryRoot != null && item.commentRepoRoot != null && comment.repositoryRoot !== item.commentRepoRoot)) {
         continue;
       }
       const anchor = anchorComment(item.fileDiff, comment);

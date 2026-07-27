@@ -26,16 +26,33 @@ export function commentSubmissionText(
     ? `lines ${comment.startLine}-${comment.endLine}`
     : `line ${comment.startLine}`;
   const version = comment.side === "deletions" ? "old" : "new";
-  const sections = [`Review comment on ${comment.filePath} ${lineRef} (${version} version):`];
+  const sections = [
+    "## Review feedback",
+    "",
+    `**File:** ${inlineCode(comment.filePath)}`,
+    `**Location:** ${version} ${lineRef}`,
+  ];
   const diffExcerpt = diffExcerptFor(fileDiff, comment.side, comment.startLine, comment.endLine);
   if (diffExcerpt !== "") {
-    sections.push(`\`\`\`diff\n${diffExcerpt}\n\`\`\``);
+    sections.push("", "**Diff context**", "", `\`\`\`diff\n${diffExcerpt}\n\`\`\``);
   } else {
     const excerpt = excerptFor(fileDiff, comment.side, comment.startLine, comment.endLine);
     if (excerpt !== "") {
-      sections.push(excerpt);
+      sections.push("", "**Selected source**", "", `\`\`\`text\n${excerpt}\n\`\`\``);
     }
   }
-  sections.push(comment.message);
-  return `${sections.join("\n\n")}\n`;
+  sections.push("", "**Review comment**", "", quote(comment.message));
+  return `${sections.join("\n")}\n`;
+}
+
+function inlineCode(value: string): string {
+  const longest = Math.max(0, ...[...value.matchAll(/`+/g)].map((match) => match[0].length));
+  const fence = "`".repeat(Math.max(1, longest + 1));
+  return `${fence}${value}${fence}`;
+}
+
+function quote(value: string): string {
+  return value.replaceAll("\r\n", "\n").replaceAll("\r", "\n").split("\n")
+    .map((line) => line === "" ? ">" : `> ${line}`)
+    .join("\n");
 }

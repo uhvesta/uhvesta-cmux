@@ -69,3 +69,34 @@ export async function saveComment(
 export async function deleteComment(repoRoot: string, id: string): Promise<void> {
   await callDiffComments<unknown>("comments.delete", { repoRoot, id });
 }
+
+export type AskedComment = {
+  question?: DiffCommentRecord;
+  answer?: DiffCommentRecord;
+  status?: "running" | "completed" | "failed";
+};
+
+export async function askComment(
+  repoRoot: string,
+  comment: DiffCommentSaveInput,
+  reviewPrompt: string,
+  question: string,
+): Promise<AskedComment> {
+  return callDiffComments<AskedComment>("comments.ask", {
+    repoRoot,
+    comment,
+    reviewPrompt,
+    question,
+  });
+}
+
+export async function sendReviewPrompt(
+  reviewPrompt: string,
+  commentTargets: readonly { id: string; repoRoot: string }[],
+): Promise<number> {
+  const value = await callDiffComments<{ queued?: number }>("comments.sendReviewPrompt", {
+    reviewPrompt,
+    commentTargets,
+  });
+  return typeof value?.queued === "number" ? value.queued : 0;
+}

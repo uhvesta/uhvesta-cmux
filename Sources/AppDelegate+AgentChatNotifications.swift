@@ -4,6 +4,31 @@ import Foundation
 // Split from AppDelegate+AgentChat.swift to keep that file under the
 // 500-line tracking threshold after concurrent merges grew it.
 extension AppDelegate {
+    /// Posts exactly one terminal notification when a one-turn review question
+    /// reaches a terminal state. Streaming ACP events update the saved answer
+    /// instead of creating notification noise.
+    func postReviewQuestionNotification(
+        workspace: Workspace,
+        panelId: UUID,
+        requestID: String,
+        succeeded: Bool,
+        body: String
+    ) {
+        TerminalNotificationStore.shared.addNotification(
+            tabId: workspace.id,
+            surfaceId: panelId,
+            title: succeeded
+                ? String(localized: "notification.reviewQuestion.completed.title", defaultValue: "Copilot answer ready")
+                : String(localized: "notification.reviewQuestion.failed.title", defaultValue: "Copilot question failed"),
+            subtitle: succeeded
+                ? String(localized: "notification.reviewQuestion.completed.subtitle", defaultValue: "Review question")
+                : String(localized: "notification.reviewQuestion.failed.subtitle", defaultValue: "Review question"),
+            body: body,
+            cooldownKey: "review-question.\(requestID)",
+            cooldownInterval: 60
+        )
+    }
+
     func postAgentChatServerUnavailableNotification(
         workspace: Workspace?,
         agentChat: CmuxAgentChatConfiguration

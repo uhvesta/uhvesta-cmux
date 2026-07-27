@@ -188,6 +188,7 @@ extension CMUXCLI {
         "ssh-session-end",
         "ssh-session-list",
         "ssh-tmux",
+        "review-companion",
         "surface",
         "surface-health",
         "surface-resume",

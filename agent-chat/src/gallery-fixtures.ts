@@ -4,6 +4,7 @@ export const galleryProviders: Provider[] = [
   { id: "claude", label: "Claude Code", installed: true, iconUrl: "/icons/claude", installCommand: "npm i -g @anthropic-ai/claude-code" },
   { id: "codex", label: "Codex", installed: true, iconUrl: "/icons/codex", iconDarkUrl: "/icons/codex?dark=1", installCommand: "npm i -g @openai/codex" },
   { id: "opencode", label: "OpenCode", installed: true, iconUrl: "/icons/opencode", installCommand: "npm i -g opencode-ai" },
+  { id: "copilot", label: "GitHub Copilot", installed: true, installCommand: "npm install -g @github/copilot" },
   { id: "pi", label: "pi", installed: true, iconUrl: "/icons/pi", installCommand: "npm i -g @mariozechner/pi" },
   { id: "gemini", label: "Gemini", installed: false, installCommand: "npm i -g @google/gemini-cli" },
 ];
@@ -54,6 +55,11 @@ export const galleryOptions: Record<string, SessionOption[]> = {
     ] },
     { id: "mode", label: "Mode", kind: "select", value: "build", choices: [{ value: "build", label: "Build" }, { value: "plan", label: "Plan" }] },
     { id: "autoApprove", label: "Auto-approve", kind: "toggle", role: "approval", value: true },
+  ],
+  copilot: [
+    { id: "model", label: "Model", kind: "select", value: "", disabled: true, description: "Loads at start" },
+    { id: "mode", label: "Mode", kind: "select", value: "plan", choices: [{ value: "build", label: "build" }, { value: "plan", label: "plan" }] },
+    { id: "autoApprove", label: "Auto-approve", kind: "toggle", role: "approval", value: false },
   ],
   pi: [
     { id: "model", label: "Model", kind: "select", value: "openai/gpt-5.4", choices: [
