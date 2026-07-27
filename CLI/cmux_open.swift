@@ -1231,7 +1231,13 @@ extension CMUXCLI {
         var params: [String: Any] = ["workspace_id": workspaceId]
         if let windowHandle { params["window_id"] = windowHandle }
         guard let response = try? client.sendV2(method: "workspace.list", params: params),
-			let workspace = (response["workspaces"] as? [[String: Any]])?.first,
+              let workspace = (response["workspaces"] as? [[String: Any]])?.first(where: {
+                  guard let candidateID = normalizedDiffSourceValue($0["id"] as? String) else {
+                      return false
+                  }
+                  return UUID(uuidString: candidateID) == UUID(uuidString: workspaceId)
+                      || candidateID == workspaceId
+              }),
               let stableId = workspace["stable_id"] as? String else {
             return nil
         }
