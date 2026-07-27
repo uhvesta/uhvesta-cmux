@@ -37,7 +37,7 @@ import type {
 } from "./comments/types";
 import { resolveDiffFileLanguage, resolveDiffPreloadLanguages } from "./diff-language";
 import { fileName, type AggregateRepository, type DiffItem, type FileTreeSource, type StreamMetrics, streamPatch } from "./diff-stream";
-import { decorateRenderedHunkGutters, DiffHeaderMetadata, fullFileHunkIsExpanded, scopedHunkID, toggleExpandedHunkID } from "./diff-metadata";
+import { decorateRenderedHunkGutters, DiffHeaderMetadata } from "./diff-metadata";
 import { applyPierreFileTreeGitStatus, planPierreFileTreeRefresh, selectPierreFileTreePath } from "./file-tree-refresh";
 import { Icon, type IconName } from "./icons";
 import { createDiffViewerLabelResolver, shouldAssertMissingLabels } from "./labels";
@@ -303,14 +303,11 @@ export function App({ config, initialStatus }: ConfigProps) {
   }
   const [activePatchURL, setActivePatchURL] = useState<string | undefined>(payload.patchURL);
   const [state, dispatch] = useReducer(reducer, initialAppState(config, initialStatus));
-  const [collapsedFullFileHunks, setCollapsedFullFileHunks] = useState<ReadonlySet<string>>(() => new Set());
-  const [fullFileViewerGeneration, setFullFileViewerGeneration] = useState(0);
   const latestState = useSyncedRef(state);
   const codeViewRef = useRef<CodeViewHandle<any> | null>(null);
   const codeViewScrollTopRef = useRef(0);
   const navigationCursorRef = useRef<ReviewCursor | null>(null);
   const openedFullFileHunkRef = useRef(false);
-  const appliedFullFileHunksRef = useRef(new Set<string>());
   const copyFallbackRef = useRef<HTMLTextAreaElement | null>(null);
   const activeSessionRef = useRef<ActiveDiffSession | null>(null);
   const viewerContainerRef = useRef<HTMLDivElement | null>(null);
@@ -334,23 +331,6 @@ export function App({ config, initialStatus }: ConfigProps) {
     repoRoots: commentRepoRoots,
   });
   const renderedCodeViewOptions = codeViewOptions(state.options, appearance);
-  const toggleFullFileHunk = useCallback((item: DiffItem, hunkIndex: number, hunkId: string) => {
-    const stateKey = scopedHunkID(item.id, hunkId);
-    const wasExpanded = fullFileHunkIsExpanded(collapsedFullFileHunks, item.id, hunkId);
-    setCollapsedFullFileHunks((current) => toggleExpandedHunkID(current, stateKey));
-    if (wasExpanded) {
-      // Pierre 1.2 exposes public expansion but no collapse method. Recreate
-      // its rendered instances and replay only the remaining stable IDs in
-      // onPostRender below rather than reaching into its private renderer.
-      appliedFullFileHunksRef.current.clear();
-      setFullFileViewerGeneration((generation) => generation + 1);
-      return;
-    }
-    appliedFullFileHunksRef.current.add(`${item.id}:${hunkId}`);
-    const instance = codeViewRef.current?.getInstance()?.getRenderedItems()
-      .find((rendered) => rendered.id === item.id && rendered.type === "diff")?.instance as any;
-    instance?.expandHunk(hunkIndex, "both", Number.MAX_SAFE_INTEGER);
-  }, [collapsedFullFileHunks]);
   renderedCodeViewOptions.onGutterUtilityClick = comments.onGutterUtilityClick as any;
   renderedCodeViewOptions.onLineClick = ((props: { lineNumber: number; annotationSide: DiffCommentSide }, context: { item: DiffItem }) => {
     navigationCursorRef.current = {
@@ -359,26 +339,13 @@ export function App({ config, initialStatus }: ConfigProps) {
       side: props.annotationSide,
     };
   }) as any;
-  renderedCodeViewOptions.onPostRender = ((node: HTMLElement, instance: any, _phase: unknown, context: { item: DiffItem }) => {
+  renderedCodeViewOptions.onPostRender = ((node: HTMLElement, _instance: any, _phase: unknown, context: { item: DiffItem }) => {
     node.dataset.cmuxReviewItemId = context.item.id;
     const renderedRoot = node.getRootNode();
     if ("host" in renderedRoot && renderedRoot.host instanceof HTMLElement) {
       renderedRoot.host.dataset.cmuxReviewItemId = context.item.id;
     }
     decorateRenderedHunkGutters(node, context.item.fileDiff);
-    if (state.options.layout === "full") {
-      const hunks = Array.isArray(context.item.fileDiff?.hunks) ? context.item.fileDiff.hunks : [];
-      hunks.forEach((hunk: any, index: number) => {
-        const hunkId = hunk?.cmuxHunkId;
-        const appliedKey = `${context.item.id}:${hunkId}`;
-        if (typeof hunkId === "string"
-          && fullFileHunkIsExpanded(collapsedFullFileHunks, context.item.id, hunkId)
-          && !appliedFullFileHunksRef.current.has(appliedKey)) {
-          appliedFullFileHunksRef.current.add(appliedKey);
-          instance?.expandHunk(index, "both", Number.MAX_SAFE_INTEGER);
-        }
-      });
-    }
     CmuxViewerNavigation.refreshRenderedRows?.(viewerContainerRef.current);
   }) as any;
   const closeActiveSession = useCallback(() => {
@@ -696,7 +663,6 @@ export function App({ config, initialStatus }: ConfigProps) {
             >
               <WorkerRenderOptionsSync codeViewRef={codeViewRef} highlighterOptions={highlighterOptions} />
               <CodeView
-                key={state.options.layout === "full" ? `full:${fullFileViewerGeneration}` : "diff"}
                 ref={codeViewRef}
                 className="code-view-root"
                 containerRef={viewerContainerRef}
@@ -711,10 +677,7 @@ export function App({ config, initialStatus }: ConfigProps) {
                     repositoryRoot={(item as DiffItem).commentRepoRoot}
                     repositoryBaseRef={(item as DiffItem).repositoryBaseRef}
                     repositoryStart={(item as DiffItem).repositoryStart}
-                    hunkScope={(item as DiffItem).id}
-                    fullFile={state.options.layout === "full"}
-                    collapsedHunkIDs={collapsedFullFileHunks}
-                    onExpandHunk={(hunkIndex, hunkId) => toggleFullFileHunk(item as DiffItem, hunkIndex, hunkId)}
+                    fullFile={false}
                   />
                 )}
                 renderAnnotation={(annotation, item) =>

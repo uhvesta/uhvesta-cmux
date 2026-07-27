@@ -118,7 +118,7 @@ test("worker highlighter options carry preloaded diff languages", () => {
   expect(options.langs).toEqual(["text", "markdown", "swift"]);
 });
 
-test("Full File keeps unchanged context under stable per-hunk control", () => {
+test("Full File renders every unchanged context region", () => {
   const options = codeViewOptions({
     collapsed: false,
     diffIndicators: "bars",
@@ -131,7 +131,7 @@ test("Full File keeps unchanged context under stable per-hunk control", () => {
   }, {});
 
   expect(options.diffStyle).toBe("unified");
-  expect(options.expandUnchanged).toBe(false);
-  expect(supportsGlobalUnchangedContext("full")).toBe(false);
+  expect(options.expandUnchanged).toBe(true);
+  expect(supportsGlobalUnchangedContext("full")).toBe(true);
   expect(supportsGlobalUnchangedContext("unified")).toBe(true);
 });
