@@ -174,7 +174,8 @@ final class DiffCommentStore {
     }
 
     func comments(repoRoot: String) -> [DiffComment] {
-        queryComments(repoRoot: repoRoot, scopeKey: scope.key)
+        claimLegacyCommentsIfNeeded(repoRoot: repoRoot)
+        return queryComments(repoRoot: repoRoot, scopeKey: scope.key)
     }
 
     @discardableResult
@@ -246,6 +247,7 @@ final class DiffCommentStore {
             return
         }
         database = handle
+        let openingVersion = migrationVersion(handle)
         guard execute("PRAGMA journal_mode = WAL;"),
               execute("""
                 CREATE TABLE IF NOT EXISTS comments (
@@ -273,12 +275,25 @@ final class DiffCommentStore {
                     PRIMARY KEY (scope, id)
                 );
                 """),
+              execute("""
+                CREATE TABLE IF NOT EXISTS legacy_comment_imports (
+                    repo_root TEXT NOT NULL,
+                    id TEXT NOT NULL,
+                    PRIMARY KEY (repo_root, id)
+                );
+                """),
               execute("CREATE INDEX IF NOT EXISTS comments_scope_repo ON comments(scope, repo_root);") else {
             return
         }
         migrateSchemaIfNeeded()
+        if openingVersion == 4 {
+            _ = execute("""
+                INSERT OR IGNORE INTO legacy_comment_imports(repo_root, id)
+                SELECT repo_root, id FROM comments WHERE scope = 'global';
+                """)
+        }
         migrateLegacyJSONIfNeeded()
-        _ = execute("PRAGMA user_version = 4;")
+        _ = execute("PRAGMA user_version = 5;")
     }
 
     private func migrateSchemaIfNeeded() {
@@ -390,9 +405,66 @@ final class DiffCommentStore {
                     repoRoot: file.repoRoot,
                     scopeKey: Scope.global.key
                 )
+                _ = execute(
+                    "INSERT OR IGNORE INTO legacy_comment_imports(repo_root, id) VALUES (?, ?);",
+                    parameters: [
+                        .text(Self.canonicalRepoRoot(file.repoRoot)),
+                        .text(comment.id.uuidString.lowercased())
+                    ]
+                )
             }
         }
         _ = execute("PRAGMA user_version = 1;")
+    }
+
+    /// Legacy JSON had no workspace identity. The first workspace that opens a
+    /// repository claims those imported rows so ordinary review tabs retain
+    /// the pre-SQLite comments without weakening scope isolation afterward.
+    private func claimLegacyCommentsIfNeeded(repoRoot: String) {
+        guard case .workspace = scope else { return }
+        let canonicalRoot = Self.canonicalRepoRoot(repoRoot)
+        let hasLegacyComments = !query(
+            "SELECT 1 FROM legacy_comment_imports WHERE repo_root = ? LIMIT 1;",
+            parameters: [.text(canonicalRoot)]
+        ) { _ in true }.isEmpty
+        guard hasLegacyComments else { return }
+        guard execute("BEGIN IMMEDIATE TRANSACTION;") else { return }
+        let copied = execute("""
+            INSERT OR IGNORE INTO comments(
+                id, scope, repo_root, file_path, side, start_line, end_line,
+                end_side, line_text, message, submission_text, consumed_at,
+                parent_id, read_only, author, repository_label, request_status,
+                sidecar_request_id, sidecar_session_id, created_at, updated_at
+            )
+            SELECT
+                comments.id, ?, comments.repo_root, comments.file_path,
+                comments.side, comments.start_line, comments.end_line,
+                comments.end_side, comments.line_text, comments.message,
+                comments.submission_text, comments.consumed_at,
+                comments.parent_id, comments.read_only, comments.author,
+                comments.repository_label, comments.request_status,
+                comments.sidecar_request_id, comments.sidecar_session_id,
+                comments.created_at, comments.updated_at
+            FROM comments
+            INNER JOIN legacy_comment_imports
+                ON legacy_comment_imports.repo_root = comments.repo_root
+                AND legacy_comment_imports.id = comments.id
+            WHERE comments.scope = 'global' AND comments.repo_root = ?;
+            """, parameters: [.text(scope.key), .text(canonicalRoot)])
+        let removed = copied && execute("""
+            DELETE FROM comments
+            WHERE scope = 'global' AND repo_root = ?
+              AND EXISTS (
+                SELECT 1 FROM legacy_comment_imports
+                WHERE legacy_comment_imports.repo_root = comments.repo_root
+                  AND legacy_comment_imports.id = comments.id
+              );
+            """, parameters: [.text(canonicalRoot)])
+        let unmarked = removed && execute(
+            "DELETE FROM legacy_comment_imports WHERE repo_root = ?;",
+            parameters: [.text(canonicalRoot)]
+        )
+        _ = execute(unmarked ? "COMMIT;" : "ROLLBACK;")
     }
 
     private func migrationVersion(_ database: OpaquePointer) -> Int32 {
