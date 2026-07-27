@@ -29,7 +29,7 @@ final class DiffCommentStoreTests: XCTestCase {
             **Diff context**
 
             ```diff
-            @@ -120,4 +120,12 @@
+            @@ -123,1 +123,7 @@
              unchanged
             +export interface DiffApp {
             +  app: Express;
@@ -597,6 +597,7 @@ final class DiffCommentsBridgeTokenTests: XCTestCase {
     }
 }
 
+@MainActor
 final class DiffReviewPromptTerminalTargetTests: XCTestCase {
     func testReviewPanelTargetsTheMostRecentlyUsedTerminalWithoutChangingFocus() {
         let reviewPanelID = UUID()

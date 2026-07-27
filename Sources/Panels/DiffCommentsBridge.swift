@@ -409,7 +409,7 @@ final class DiffCommentsBridge: NSObject, WKScriptMessageHandlerWithReply {
         guard let app else {
             let failed = markQuestionFailed(savedQuestion, existingAnswer: pendingAnswer, repoRoot: repoRoot, store: scopedStore)
             let savedAnswer = failed.answer
-            AppDelegate.shared?.postReviewQuestionNotification(
+            AppDelegate.postReviewQuestionNotification(
                 workspace: workspace,
                 panelId: panelId,
                 requestID: savedAnswer.id.uuidString,
@@ -811,7 +811,21 @@ final class DiffCommentsBridge: NSObject, WKScriptMessageHandlerWithReply {
         let scopedStore = store.workspaceStore(for: workspace.stableId)
         guard let app = AppDelegate.shared else {
             for question in questions {
-                _ = markQuestionFailed(question, existingAnswer: comments.first { $0.parentId == question.id }, repoRoot: repoRoot, store: scopedStore)
+                let failed = markQuestionFailed(
+                    question,
+                    existingAnswer: comments.first { $0.parentId == question.id },
+                    repoRoot: repoRoot,
+                    store: scopedStore
+                )
+                if let panelId {
+                    AppDelegate.postReviewQuestionNotification(
+                        workspace: workspace,
+                        panelId: panelId,
+                        requestID: question.sidecarRequestID ?? question.id.uuidString,
+                        succeeded: false,
+                        body: failed.answer.message
+                    )
+                }
             }
             return
         }
@@ -820,7 +834,21 @@ final class DiffCommentsBridge: NSObject, WKScriptMessageHandlerWithReply {
             guard questionTasks[taskKey] == nil else { continue }
             guard let requestID = question.sidecarRequestID, !requestID.isEmpty,
                   let sessionID = question.sidecarSessionID, !sessionID.isEmpty else {
-                _ = markQuestionFailed(question, existingAnswer: comments.first { $0.parentId == question.id }, repoRoot: repoRoot, store: scopedStore)
+                let failed = markQuestionFailed(
+                    question,
+                    existingAnswer: comments.first { $0.parentId == question.id },
+                    repoRoot: repoRoot,
+                    store: scopedStore
+                )
+                if let panelId {
+                    app.postReviewQuestionNotification(
+                        workspace: workspace,
+                        panelId: panelId,
+                        requestID: question.sidecarRequestID ?? question.id.uuidString,
+                        succeeded: false,
+                        body: failed.answer.message
+                    )
+                }
                 continue
             }
             do {
@@ -884,7 +912,21 @@ final class DiffCommentsBridge: NSObject, WKScriptMessageHandlerWithReply {
                     task: task
                 )
             } catch {
-                _ = markQuestionFailed(question, existingAnswer: comments.first { $0.parentId == question.id }, repoRoot: repoRoot, store: scopedStore)
+                let failed = markQuestionFailed(
+                    question,
+                    existingAnswer: comments.first { $0.parentId == question.id },
+                    repoRoot: repoRoot,
+                    store: scopedStore
+                )
+                if let panelId {
+                    app.postReviewQuestionNotification(
+                        workspace: workspace,
+                        panelId: panelId,
+                        requestID: requestID,
+                        succeeded: false,
+                        body: failed.answer.message
+                    )
+                }
             }
         }
     }
@@ -897,9 +939,9 @@ final class DiffCommentsBridge: NSObject, WKScriptMessageHandlerWithReply {
     }
 
     private func registerPending(_ comment: DiffComment, repoRoot: String, workspaceId: UUID) {
+        let submissionText = comment.focusedSubmissionText
         guard !Self.isReviewQuestion(comment),
               comment.consumedAt == nil,
-              let submissionText = comment.submissionText,
               !submissionText.isEmpty else {
             return
         }

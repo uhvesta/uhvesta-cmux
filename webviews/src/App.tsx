@@ -54,7 +54,13 @@ import {
   reviewHunks,
   type ReviewCursor,
 } from "./review-hunks";
-import { isAskComment, isRemoteReviewRoot, reviewPrompt } from "./review-prompt";
+import {
+  commentsAfterReviewPromptSent,
+  isAskComment,
+  isRemoteReviewRoot,
+  reviewPrompt,
+  reviewQuestionContext,
+} from "./review-prompt";
 import {
   codeViewOptions,
   fileTreeUnsafeCSS,
@@ -625,7 +631,15 @@ export function App({ config, initialStatus }: ConfigProps) {
         }}
         onSendReviewPrompt={async () => {
           try {
-            await comments.sendReviewPrompt();
+            const sentCommentIDs = await comments.sendReviewPrompt();
+            dispatch({
+              type: "replace-comments",
+              comments: commentsAfterReviewPromptSent(
+                latestState.current.comments,
+                sentCommentIDs,
+                new Date().toISOString(),
+              ),
+            });
             dispatch({ type: "set-copy-feedback", message: label("queuedReviewPrompt") });
           } catch {
             dispatch({ type: "set-copy-feedback", message: label("sendReviewPromptFailed") });
@@ -870,7 +884,7 @@ function useDiffComments({
       if (question === "") return;
       const askRecord = { ...record, submissionText: undefined };
       const ask = bridgeAvailable
-        ? bridgeAskComment(repoRoot, askRecord, reviewPrompt(latestState.current.comments), question)
+        ? bridgeAskComment(repoRoot, askRecord, reviewQuestionContext(record as DiffCommentRecord), question)
         : Promise.resolve({ question: localCommentRecord(askRecord), status: "failed" as const });
       ask
         .then((result) => {
@@ -934,15 +948,16 @@ function useDiffComments({
     }
   };
 
-  const sendReviewPrompt = async (): Promise<number> => {
+  const sendReviewPrompt = async (): Promise<string[]> => {
     if (!bridgeAvailable || repoRoots.length === 0) throw new Error("Diff comments bridge is unavailable.");
     const feedback = latestState.current.comments.filter((comment) =>
       comment.parentId == null && !comment.readOnly && !comment.consumedAt && !isAskComment(comment),
     );
-    return bridgeSendReviewPrompt(reviewPrompt(feedback), feedback.map((comment) => ({
+    await bridgeSendReviewPrompt(reviewPrompt(feedback), feedback.map((comment) => ({
       id: comment.id,
       repoRoot: comment.repositoryRoot ?? repoRoots[0]!,
     })));
+    return feedback.map((comment) => comment.id);
   };
 
   return { editMessage, onGutterUtilityClick, onLoaded, remove, saveDraft, sendReviewPrompt };
@@ -1547,7 +1562,7 @@ function OptionsMenu({
         <MenuButton icon="external" label={label("openSourceURL")} onClick={() => window.open(externalURL, "_blank", "noreferrer")} />
       ) : null}
       <MenuButton checked={state.filesVisible} icon="files" label={state.filesVisible ? label("hideFiles") : label("showFiles")} onClick={() => dispatch({ type: "set-files-visible", visible: !state.filesVisible })} />
-      {supportsGlobalUnchangedContext(state.options.layout) ? (
+      {state.options.layout !== "full" && supportsGlobalUnchangedContext(state.options.layout) ? (
         <MenuButton checked={state.options.expandUnchanged} icon="document" label={state.options.expandUnchanged ? label("collapseUnchangedContext") : label("expandUnchangedContext")} onClick={() => toggle("expandUnchanged")} />
       ) : null}
       <MenuButton checked={state.options.showBackgrounds} icon="background" label={state.options.showBackgrounds ? label("hideBackgrounds") : label("showBackgrounds")} onClick={() => toggle("showBackgrounds")} />

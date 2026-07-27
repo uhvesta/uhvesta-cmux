@@ -1683,7 +1683,7 @@ final class CMUXOpenCommandTests: XCTestCase {
         defaults.set("global-base", forKey: "diffViewer.branchBaseRef")
         defaults.set(
             [stableWorkspaceID: "workspace-base"],
-            forKey: DiffBaseRefSettings.workspaceOverridesKey
+            forKey: "diffViewer.branchBaseRef.workspaceOverrides"
         )
         defaults.synchronize()
 
