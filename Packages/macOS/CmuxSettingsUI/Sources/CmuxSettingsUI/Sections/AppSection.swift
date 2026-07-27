@@ -14,7 +14,7 @@ import SwiftUI
 /// Notifications, Notification Sound, Notification Command, Send
 /// anonymous telemetry, Warn Before Quit, Warn Before Closing Tab /
 /// X Button / Hide Tab Close Button, Rename Selects Existing Name,
-/// Command Palette Searches All Surfaces.
+/// Command Palette Searches All Surfaces, and branch-diff base overrides.
 @MainActor
 public struct AppSection: View {
     private let catalog: SettingCatalog
@@ -33,6 +33,7 @@ public struct AppSection: View {
     @State private var firstClick: DefaultsValueModel<Bool>
     @State private var fileDrop: DefaultsValueModel<FileDropDefaultBehavior>
     @State private var preferredEditor: DefaultsValueModel<String>
+    @State private var diffViewerBranchBaseRef: DefaultsValueModel<String>
     @State private var openSupported: DefaultsValueModel<Bool>
     @State private var openMarkdown: DefaultsValueModel<Bool>
     @State private var globalFontMagnification: DefaultsValueModel<Int>
@@ -67,6 +68,8 @@ public struct AppSection: View {
     // Sticky: a picker change can rewrite the OS AppleLanguages override even when the selection returns to its starting value (clearing a preserved foreign override via an explicit pick, then System), so the restart hint must not rely on the value comparison alone.
     @State private var languageOverrideTouched = false
     @State private var telemetryAtAppear: Bool?
+    @State private var workspaceDiffBranchBaseRef = ""
+    @State private var workspaceDiffBranchBaseRefWorkspaceID: String?
 
     public init(
         defaultsStore: UserDefaultsSettingsStore,
@@ -85,6 +88,7 @@ public struct AppSection: View {
         _firstClick = State(initialValue: DefaultsValueModel(store: defaultsStore, key: catalog.app.focusPaneOnFirstClick))
         _fileDrop = State(initialValue: DefaultsValueModel(store: defaultsStore, key: catalog.app.fileDropDefaultBehavior))
         _preferredEditor = State(initialValue: DefaultsValueModel(store: defaultsStore, key: catalog.app.preferredEditor))
+        _diffViewerBranchBaseRef = State(initialValue: DefaultsValueModel(store: defaultsStore, key: catalog.app.diffViewerBranchBaseRef))
         _openSupported = State(initialValue: DefaultsValueModel(store: defaultsStore, key: catalog.app.openSupportedFilesInCmux))
         _openMarkdown = State(initialValue: DefaultsValueModel(store: defaultsStore, key: catalog.app.openMarkdownInCmuxViewer))
         _globalFontMagnification = State(initialValue: DefaultsValueModel(store: defaultsStore, key: catalog.app.globalFontMagnification))
@@ -136,8 +140,12 @@ public struct AppSection: View {
             mainCard
         }
         .task {
-            startSettingsObservation([language, appearance, appIcon, placement, inheritDir, minimalMode, keepWorkspaceOpen, firstClick, fileDrop, preferredEditor, openSupported, openMarkdown, globalFontMagnification, markdownFontSize, markdownFontFamily, markdownMaxWidth, canvasPaneGap, canvasSnapping, fileEditorWordWrap, iMessage, reorder, dockBadge, menuBarOnly, showInMenuBar, paneRing, paneFlash, agentPermissionPrompt, agentTurnComplete, agentIdleReminder, soundName, soundCommand, customSoundFile, telemetry, confirmQuit, warnCloseTab, warnCloseX, hideCloseButton, renameSelects, paletteAllSurfaces])
+            startSettingsObservation([language, appearance, appIcon, placement, inheritDir, minimalMode, keepWorkspaceOpen, firstClick, fileDrop, preferredEditor, diffViewerBranchBaseRef, openSupported, openMarkdown, globalFontMagnification, markdownFontSize, markdownFontFamily, markdownMaxWidth, canvasPaneGap, canvasSnapping, fileEditorWordWrap, iMessage, reorder, dockBadge, menuBarOnly, showInMenuBar, paneRing, paneFlash, agentPermissionPrompt, agentTurnComplete, agentIdleReminder, soundName, soundCommand, customSoundFile, telemetry, confirmQuit, warnCloseTab, warnCloseX, hideCloseButton, renameSelects, paletteAllSurfaces])
             if languageAtAppear == nil { languageAtAppear = language.current }; if telemetryAtAppear == nil { telemetryAtAppear = telemetry.current }
+            loadWorkspaceDiffBranchBaseRef(workspaceID: hostActions.selectedWorkspaceDiffBranchBaseRefID())
+            for await workspaceID in hostActions.selectedWorkspaceDiffBranchBaseRefIDUpdates() {
+                loadWorkspaceDiffBranchBaseRef(workspaceID: workspaceID)
+            }
         }
     }
 
@@ -176,6 +184,51 @@ public struct AppSection: View {
                 }
                 .labelsHidden()
                 .pickerStyle(.menu)
+            }
+            SettingsCardDivider()
+
+            // Branch diff base overrides
+            SettingsCardRow(
+                configurationReview: .json("app.diffViewerBranchBaseRef"),
+                searchAnchorID: "setting:app:diff-viewer-branch-base",
+                String(localized: "settings.app.diffViewerBranchBaseRef", defaultValue: "Default Branch Diff Base"),
+                subtitle: String(localized: "settings.app.diffViewerBranchBaseRef.subtitle", defaultValue: "Use this ref for branch diffs when set. Leave empty to use cmux's existing automatic detection."),
+                controlWidth: 240
+            ) {
+                TextField(
+                    String(localized: "settings.app.diffViewerBranchBaseRef.placeholder", defaultValue: "e.g. origin/main"),
+                    text: Binding(get: { diffViewerBranchBaseRef.current }, set: { diffViewerBranchBaseRef.set($0) })
+                )
+                .textFieldStyle(.roundedBorder)
+            }
+            SettingsCardDivider()
+
+            SettingsCardRow(
+                configurationReview: .settingsOnly,
+                searchAnchorID: "setting:app:workspace-diff-base",
+                String(localized: "settings.app.workspaceDiffBranchBaseRef", defaultValue: "Active Workspace Branch Diff Base"),
+                subtitle: String(localized: "settings.app.workspaceDiffBranchBaseRef.subtitle", defaultValue: "Overrides the default above for the currently selected workspace. Leave empty to remove the workspace override."),
+                controlWidth: 240
+            ) {
+                HStack(spacing: 6) {
+                    TextField(
+                        String(localized: "settings.app.workspaceDiffBranchBaseRef.placeholder", defaultValue: "e.g. upstream/main"),
+                        text: Binding(
+                            get: { workspaceDiffBranchBaseRef },
+                            set: { value in
+                                workspaceDiffBranchBaseRef = value
+                                saveWorkspaceDiffBranchBaseRef(value)
+                            }
+                        )
+                    )
+                    .textFieldStyle(.roundedBorder)
+                    Button(String(localized: "settings.app.workspaceDiffBranchBaseRef.clear", defaultValue: "Clear")) {
+                        workspaceDiffBranchBaseRef = ""
+                        saveWorkspaceDiffBranchBaseRef(nil)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                }
             }
             SettingsCardDivider()
 
@@ -775,6 +828,16 @@ public struct AppSection: View {
                     .accessibilityIdentifier("CommandPaletteSearchAllSurfacesToggle")
             }
         }
+    }
+
+    private func loadWorkspaceDiffBranchBaseRef(workspaceID: String?) {
+        workspaceDiffBranchBaseRefWorkspaceID = workspaceID
+        workspaceDiffBranchBaseRef = workspaceID.flatMap(hostActions.workspaceDiffBranchBaseRef(workspaceID:)) ?? ""
+    }
+
+    private func saveWorkspaceDiffBranchBaseRef(_ value: String?) {
+        guard let workspaceID = workspaceDiffBranchBaseRefWorkspaceID else { return }
+        hostActions.setWorkspaceDiffBranchBaseRef(value, workspaceID: workspaceID)
     }
 
     /// Standard macOS notification sound names plus cmux-specific

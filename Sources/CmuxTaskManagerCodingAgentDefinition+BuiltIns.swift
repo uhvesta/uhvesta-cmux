@@ -39,8 +39,14 @@ extension CmuxTaskManagerCodingAgentDefinition {
               launchKinds: ["rovodev", "rovo"], directBasenames: ["rovodev"], argumentNeedles: ["rovodev"]),
         .init(id: "hermes-agent", displayName: "Hermes Agent", assetName: "AgentIcons/HermesAgent",
               launchKinds: ["hermes-agent"], directBasenames: ["hermes", "hermes-agent"], argumentNeedles: ["hermes-agent"]),
-        .init(id: "copilot", displayName: "Copilot", assetName: nil,
-              launchKinds: ["copilot"], directBasenames: ["copilot"], argumentNeedles: ["copilot"]),
+        .init(
+            id: "copilot",
+            displayName: String(localized: "taskManager.agent.copilot", defaultValue: "GitHub Copilot"),
+            assetName: nil,
+            launchKinds: ["copilot", "copilot-cli", "github-copilot"],
+            directBasenames: ["copilot", "copilot-cli", "github-copilot"],
+            argumentNeedles: ["copilot", "copilot-cli", "github-copilot", "@github/copilot", "github/copilot-cli"]
+        ),
         .init(id: "codebuddy", displayName: "CodeBuddy", assetName: nil,
               launchKinds: ["codebuddy"], directBasenames: ["codebuddy"], argumentNeedles: ["codebuddy"]),
         .init(id: "factory", displayName: "Factory", assetName: nil,

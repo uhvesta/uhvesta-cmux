@@ -935,6 +935,7 @@ struct CmuxSurfaceTabBarButton: Codable, Sendable, Hashable, Identifiable {
 
     static let newTerminal = actionReference(CmuxSurfaceTabBarBuiltInAction.newTerminal.configID)
     static let newBrowser = actionReference(CmuxSurfaceTabBarBuiltInAction.newBrowser.configID)
+    static let newReviewTab = actionReference(CmuxSurfaceTabBarBuiltInAction.newReviewTab.configID)
     static let splitRight = actionReference(CmuxSurfaceTabBarBuiltInAction.splitRight.configID)
     static let splitDown = actionReference(CmuxSurfaceTabBarBuiltInAction.splitDown.configID)
 
@@ -1386,6 +1387,9 @@ struct CmuxResolvedConfigAction: Identifiable, Sendable, Hashable {
         case .newBrowser:
             title = String(localized: "command.newBrowserTab.title", defaultValue: "New Browser Tab")
             keywords = ["new", "browser", "tab", "surface"]
+        case .newReviewTab:
+            title = String(localized: "command.newReviewTab.title", defaultValue: "New Review Tab")
+            keywords = ["new", "review", "diff", "changes", "git"]
         case .splitRight:
             title = String(localized: "command.terminalSplitRight.title", defaultValue: "Split Right")
             keywords = ["terminal", "split", "right"]

@@ -15,10 +15,18 @@ import { claudeAdapter } from "./adapters/claude";
 import { codexAdapter } from "./adapters/codex";
 import { piAdapter } from "./adapters/pi";
 import { makeAcpAdapter } from "./adapters/acp";
+import {
+  createReviewQuestionResult,
+  formatReadOnlyReviewPrompt,
+  normalizeReviewQuestionRequest,
+  reduceReviewQuestionEvent,
+  reviewOnlyCopilotLaunch,
+  type ReviewQuestionResult,
+} from "./review-question";
 import { pickAccentColor, resolveGhosttyTheme, resolveGhosttyThemeAsync, type GhosttyTheme } from "./theme";
 import { agentModelCatalog, type AgentModelProviderCatalog } from "./catalog";
 import { existsSync, readFileSync, statSync, watch, type FSWatcher } from "node:fs";
-import { mkdir, readdir, rename, stat, writeFile } from "node:fs/promises";
+import { mkdir, readdir, realpath, rename, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename as pathBasename, dirname, extname, isAbsolute, join, relative, resolve } from "node:path";
 
@@ -148,6 +156,7 @@ const PROVIDERS: ProviderDef[] = [
   { id: "claude", label: "Claude Code", adapter: "claude", cmd: ["claude"], installCommand: "npm i -g @anthropic-ai/claude-code" },
   { id: "codex", label: "Codex", adapter: "codex", cmd: ["codex"], installCommand: "npm i -g @openai/codex" },
   { id: "opencode", label: "OpenCode", adapter: "acp", cmd: ["opencode", "acp"], installCommand: "npm i -g opencode-ai" },
+  { id: "copilot", label: "GitHub Copilot", adapter: "acp", cmd: ["copilot", "--acp"], installCommand: "npm install -g @github/copilot" },
   { id: "pi", label: "pi", adapter: "pi", cmd: ["pi"], installCommand: "npm i -g @mariozechner/pi" },
   {
     id: "gemini",
@@ -179,6 +188,11 @@ interface WsData {
 }
 
 const sessions = new Map<string, Session>();
+// Headless review questions deliberately reuse normal ACP sessions so their
+// status, streamed deltas, tool activity, errors, and completion fan out over
+// the existing WebSocket/event machinery. This map is the small REST-facing
+// projection consumed by the native review panel.
+const reviewQuestions = new Map<string, ReviewQuestionResult>();
 const allSockets = new Set<Bun.ServerWebSocket<WsData>>();
 let fileTheme = resolveGhosttyTheme();
 let cmuxThemeOverride: GhosttyTheme | null = null;
@@ -254,10 +268,37 @@ function providerInfo(p: ProviderDef) {
     // Bun.which ignores runtime process.env.PATH mutations (it reads the
     // process's original environ), so pass the prepended PATH explicitly or
     // every provider reads as uninstalled under launchd's minimal PATH.
-    installed: Boolean(Bun.which(p.cmd?.[0] ?? p.id, { PATH: process.env.PATH })),
+    installed: isProviderInstalled(p),
     installCommand: p.installCommand,
     ...(providerIconInfo.get(p.id) ?? {}),
   };
+}
+
+function isProviderInstalled(provider: ProviderDef): boolean {
+  return Boolean(Bun.which(provider.cmd?.[0] ?? provider.id, { PATH: process.env.PATH }));
+}
+
+/** Runtime registry seam for focused provider tests. */
+export function registeredProviderForTest(id: string) {
+  const provider = PROVIDERS.find((candidate) => candidate.id === id);
+  if (!provider) return null;
+  return {
+    id: provider.id,
+    label: provider.label,
+    adapter: provider.adapter,
+    cmd: [...(provider.cmd ?? [])],
+    installCommand: provider.installCommand,
+    adapterRegistered: adapters.has(provider.id),
+  };
+}
+
+/** Tests the same executable-name probe used by the provider registry. */
+export function providerAvailabilityForTest(
+  id: string,
+  executableExists: (name: string) => boolean,
+): boolean {
+  const provider = PROVIDERS.find((candidate) => candidate.id === id);
+  return provider ? executableExists(provider.cmd?.[0] ?? provider.id) : false;
 }
 
 function broadcastSessions() {
@@ -341,6 +382,7 @@ function createSession(
       }
       if (sess.status === status) return;
       sess.status = status;
+      recordReviewQuestionStatus(sess, status);
       const payload = JSON.stringify({ kind: "session-status", sessionId: id, status });
       for (const ws of sess.sockets) ws.send(payload);
       broadcastSessions();
@@ -355,10 +397,29 @@ function emitSessionEvent(sess: Session, evt: AgentEvent) {
   const generation = currentAttributionGeneration(sess);
   const generations = eventGenerations(sess);
   recordSessionEventSideEffects(sess, evt);
+  recordReviewQuestionEvent(sess, evt);
   sess.events.push(evt);
   generations.push(generation);
   capSessionEvents(sess);
   broadcastSessionEvent(sess, evt);
+}
+
+function recordReviewQuestionEvent(sess: Session, evt: AgentEvent) {
+  const result = reviewQuestions.get(sess.id);
+  if (!result) return;
+  reviewQuestions.set(sess.id, reduceReviewQuestionEvent(result, evt));
+}
+
+function recordReviewQuestionStatus(sess: Session, status: SessionStatus) {
+  const result = reviewQuestions.get(sess.id);
+  if (!result || result.status !== "running") return;
+  if (status === "error" || status === "exited") {
+    reviewQuestions.set(sess.id, {
+      ...result,
+      status: "failed",
+      error: result.error ?? `Copilot session ${status}`,
+    });
+  }
 }
 
 function recordSessionEventSideEffects(sess: Session, evt: AgentEvent) {
@@ -487,7 +548,14 @@ function emitDoneAfterFiles(sess: Session, evt: InternalDoneEvent) {
     const oldLength = sess.events.length;
     const result = insertDeferredTurnEvents(sess.events, eventGenerations(sess), generation, finalEvents);
     if (result.dropped) return;
-    for (const finalEvt of finalEvents) recordSessionEventSideEffects(sess, finalEvt);
+    for (const finalEvt of finalEvents) {
+      recordSessionEventSideEffects(sess, finalEvt);
+      // Done events are deliberately delayed until file attribution has
+      // completed. Review questions expose their result through REST, so fold
+      // that deferred terminal event into the same reducer used for ordinary
+      // streamed events before a GET can observe the result.
+      recordReviewQuestionEvent(sess, finalEvt);
+    }
     capSessionEvents(sess);
     if (result.insertedAt >= oldLength) {
       for (const finalEvt of finalEvents) broadcastSessionEvent(sess, finalEvt);
@@ -601,7 +669,7 @@ function applyAutoApproveDefaults(provider: string, autoApprove: boolean, raw: R
   } else if (provider === "codex") {
     if (out.approvals === undefined) out.approvals = autoApprove ? "never" : "on-request";
     if (out.sandbox === undefined) out.sandbox = autoApprove ? "workspace-write" : "read-only";
-  } else if (provider === "opencode" || provider === "gemini") {
+  } else if (provider === "opencode" || provider === "gemini" || provider === "copilot") {
     if (out.autoApprove === undefined) out.autoApprove = autoApprove;
   }
   return out;
@@ -1808,6 +1876,51 @@ function startServer() {
     if (url.pathname === "/api/sessions" && req.method === "GET") {
       return Response.json([...sessions.values()].sort((a, b) => b.createdAt - a.createdAt).map(sessionSummary));
     }
+    // A review question is a single, read-only Copilot ACP turn. It reuses a
+    // normal session internally, which keeps the provider's event/status
+    // propagation identical to agent-chat while exposing a compact REST result
+    // for the native diff bridge. There is intentionally no follow-up prompt
+    // endpoint for this resource.
+    if (url.pathname === "/api/review-questions" && req.method === "POST") {
+      if (!hasTrustedOrigin(req)) return Response.json({ error: "forbidden" }, { status: 403 });
+      let reviewRequest;
+      try {
+        reviewRequest = normalizeReviewQuestionRequest(await req.json());
+        await assertCwd(reviewRequest.repoRoot);
+        // `sandbox-exec` matches literal paths. Canonicalize before embedding
+        // the root so `/tmp` cannot bypass a `/private/tmp` deny rule on macOS.
+        reviewRequest = { ...reviewRequest, repoRoot: await realpath(reviewRequest.repoRoot) };
+      } catch (err) {
+        return Response.json({ error: String(err instanceof Error ? err.message : err) }, { status: 400 });
+      }
+      const sess = createSession("copilot", reviewRequest.repoRoot, false, reviewRequest.title);
+      sess.internal.reviewOnly = reviewOnlyCopilotLaunch(reviewRequest.repoRoot);
+      reviewQuestions.set(sess.id, createReviewQuestionResult(sess.id, reviewRequest));
+      refreshSession(sess);
+      sendPrompt(sess, formatReadOnlyReviewPrompt(reviewRequest));
+      return Response.json({
+        ...reviewQuestions.get(sess.id)!,
+        session: sessionSummary(sess),
+      }, { status: 202 });
+    }
+    const reviewQuestionMatch = /^\/api\/review-questions\/([a-z0-9-]+)$/i.exec(url.pathname);
+    if (reviewQuestionMatch) {
+      const id = reviewQuestionMatch[1]!;
+      const result = reviewQuestions.get(id);
+      const sess = sessions.get(id);
+      if (!result || !sess) return Response.json({ error: "review question not found" }, { status: 404 });
+      if (req.method === "GET") {
+        return Response.json({ ...result, session: sessionSummary(sess) });
+      }
+      if (req.method === "DELETE") {
+        sess.adapter.dispose(sess);
+        sessions.delete(sess.id);
+        reviewQuestions.delete(id);
+        broadcastSessions();
+        return new Response(null, { status: 204 });
+      }
+      return new Response("method not allowed", { status: 405 });
+    }
     return new Response(renderPage(url), { headers: { "content-type": "text/html; charset=utf-8" } });
     },
     websocket: {
@@ -1964,6 +2077,10 @@ function handleMessage(ws: Bun.ServerWebSocket<WsData>, msg: any) {
       const sess = sessions.get(String(msg.sessionId));
       const prompt = String(msg.prompt ?? "").trim();
       if (!sess || !prompt) return;
+      if (reviewQuestions.has(sess.id)) {
+        sendWsErrorDetails(ws, "send", new Error("review questions accept exactly one prompt"), { sessionId: sess.id });
+        return;
+      }
       sendPrompt(sess, prompt);
       break;
     }

@@ -27,11 +27,26 @@ export type FileStats = {
 };
 
 export type DiffItem = CodeViewItem<CommentAnnotationMetadata> & {
+  /** Canonical repository which owns this file in an aggregate review. */
+  commentRepoRoot?: string;
+  /** Repository-relative path used as the durable comment anchor. */
+  commentFilePath?: string;
   collapsed?: boolean;
   fileDiff?: any;
   id: string;
+  repositoryLabel?: string;
+  repositoryBaseRef?: string;
+  /** True for the first streamed file in an aggregate repository section. */
+  repositoryStart?: boolean;
   type?: string;
   version?: number;
+};
+
+export type AggregateRepository = {
+  baseRef?: string;
+  id: string;
+  label: string;
+  root: string;
 };
 
 export type FileTreeSource = FileTreeRefreshSource & {
@@ -79,6 +94,7 @@ type StreamingDiffModel = {
   gitStatusIndexByPath: Map<string, number>;
   itemIdByTreePath: Map<string, string>;
   itemIdToFile: Map<string, { fileOrder: number; path: string }>;
+  lastAggregateRepositoryID?: string;
   items: DiffItem[];
   nextCollisionSuffixByBase: Map<string, number>;
   paths: string[];
@@ -100,6 +116,7 @@ type RenameDiffItem = {
 };
 
 export type StreamPatchOptions = {
+  aggregateRepositories?: readonly AggregateRepository[];
   getCollapsed: () => boolean;
   initialFileTreeRowCount: number;
   label: DiffViewerLabelResolver;
@@ -151,6 +168,9 @@ export async function streamPatch(options: StreamPatchOptions): Promise<void> {
     annotateDiffMetadata(fileDiff);
     normalizeGitFileDiffPaths(fileDiff);
     const result = appendFileDiffToModel(model, fileDiff, patchPrefix, options.getCollapsed(), options.label("untitled"));
+    if (result?.item != null) {
+      applyAggregateRepositoryMetadata(model, result.item, options.aggregateRepositories);
+    }
     if (result?.renamedItem) {
       options.onRename(result.renamedItem);
     }
@@ -302,6 +322,19 @@ export async function streamPatch(options: StreamPatchOptions): Promise<void> {
   metrics.completedAt = performance.now();
   options.onMetrics({ ...metrics });
   options.onComplete({ ...metrics });
+}
+
+function applyAggregateRepositoryMetadata(model: StreamingDiffModel, item: DiffItem, repositories: readonly AggregateRepository[] | undefined): void {
+  if (repositories == null || repositories.length === 0 || item.fileDiff == null) return;
+  const path = fileName(item.fileDiff, "");
+  const repository = repositories.find((candidate) => path === candidate.id || path.startsWith(`${candidate.id}/`));
+  if (repository == null) return;
+  item.commentRepoRoot = repository.root;
+  item.repositoryLabel = repository.label;
+  item.repositoryBaseRef = repository.baseRef;
+  item.commentFilePath = path === repository.id ? "" : path.slice(repository.id.length + 1);
+  item.repositoryStart = model.lastAggregateRepositoryID !== repository.id;
+  model.lastAggregateRepositoryID = repository.id;
 }
 
 function createStreamingDiffModel(): StreamingDiffModel {

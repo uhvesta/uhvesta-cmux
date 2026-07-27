@@ -6,7 +6,8 @@ export type DiffViewerOptions = {
   collapsed: boolean;
   diffIndicators: "bars" | "classic" | "none";
   expandUnchanged: boolean;
-  layout: "split" | "unified";
+  /** `full` is rendered as unified Pierre content with every available context region expanded. */
+  layout: "split" | "unified" | "full";
   lineNumbers: boolean;
   showBackgrounds: boolean;
   wordDiffs: boolean;
@@ -19,9 +20,11 @@ export function codeViewOptions(
 ): CodeViewOptions<any> {
   return {
     layout: { paddingTop: 0, gap: 1, paddingBottom: 0 },
-    diffStyle: options.layout,
+    diffStyle: options.layout === "split" ? "split" : "unified",
     diffIndicators: options.diffIndicators,
     overflow: options.wordWrap ? "wrap" : "scroll",
+    // Full File drives Pierre's public per-hunk expansion API from App. Do not
+    // set this global flag: it bypasses the individual stable hunk controls.
     expandUnchanged: options.expandUnchanged,
     disableBackground: !options.showBackgrounds,
     disableLineNumbers: !options.lineNumbers,
@@ -102,6 +105,20 @@ export function codeViewUnsafeCSS(): string {
         var(--diffs-bg-buffer) 4.242px,
         var(--diffs-bg-buffer) 5.656px
       );
+    }
+    [data-column-number] [data-cmux-hunk-badge] {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 1.3em;
+      height: 1.3em;
+      margin-inline-start: 0.35em;
+      border-radius: 999px;
+      background: var(--cmux-diff-accent, light-dark(#0a84ff, #7ab7ff));
+      color: light-dark(#fff, #08233f);
+      font-size: 0.72em;
+      font-weight: 700;
+      line-height: 1;
     }
     [data-separator='line-info'] {
       background-color: transparent;

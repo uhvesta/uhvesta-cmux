@@ -989,6 +989,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     /// instead of spawning the bundled `cmux diff` CLI, so shortcut-dispatch tests can
     /// assert routing without launching a subprocess.
     var debugOpenDiffViewerHandler: (() -> Void)?
+    /// Test seam for the aggregate review entrypoint. This is separate from the
+    /// regular diff seam so tests can prove the aggregate route is selected.
+    var debugOpenReviewTabHandler: (() -> Void)?
+    /// Test seam for the final bundled CLI invocation. It captures the exact
+    /// arguments after the shared review path selects its comparison source.
+    var debugLaunchDiffViewerProcessHandler: (([String]) -> Void)?
     var debugCreateMainWindowSourceIsNativeFullScreenOverride: Bool?
     // Keep debug-only windows alive when tests intentionally inject key mismatches.
     private var debugDetachedContextWindows: [NSWindow] = []
@@ -6041,12 +6047,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         openDiffViewerForFocusedWorkspace(for: tabManager, preferAgentContext: false)
     }
 
+    /// Opens one aggregate review tab rooted at the focused workspace directory.
+    /// This deliberately bypasses agent-turn detection: review tabs compare every
+    /// leaf repository below the workspace rather than one active agent repository.
+    @discardableResult
+    func openReviewTabForFocusedWorkspace(for tabManager: TabManager?) -> Bool {
+        openDiffViewerForFocusedWorkspace(
+            for: tabManager,
+            preferAgentContext: false,
+            aggregateReview: true
+        )
+    }
+
     @discardableResult
     private func openDiffViewerForFocusedWorkspace(
         for tabManager: TabManager?,
-        preferAgentContext: Bool
+        preferAgentContext: Bool,
+        aggregateReview: Bool = false
     ) -> Bool {
 #if DEBUG
+        if aggregateReview, let debugOpenReviewTabHandler {
+            debugOpenReviewTabHandler()
+            return true
+        }
         if let debugOpenDiffViewerHandler {
             debugOpenDiffViewerHandler()
             return true
@@ -6105,7 +6128,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             workspaceId: workspace.id,
             surfaceId: workspace.focusedPanelId,
             useLastTurnSource: false,
-            sessionId: agentDiffContext?.sessionId
+            sessionId: agentDiffContext?.sessionId,
+            aggregateReview: aggregateReview
         )
     }
 
@@ -6132,6 +6156,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         surfaceId: UUID?,
         useLastTurnSource: Bool,
         sessionId: String?,
+        aggregateReview: Bool = false,
         focus: Bool = true
     ) -> Bool {
         let process = Process()
@@ -6139,7 +6164,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         var arguments = [
             "--socket", socketPath,
             "diff",
-            useLastTurnSource ? "--last-turn" : "--unstaged",
+            aggregateReview ? "--branch" : (useLastTurnSource ? "--last-turn" : "--unstaged"),
             "--cwd", cwd,
             "--workspace", workspaceId.uuidString,
             "--focus", focus ? "true" : "false",
@@ -6150,6 +6175,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         if useLastTurnSource, let sessionId {
             arguments.append(contentsOf: ["--session", sessionId])
         }
+        if aggregateReview {
+            arguments.append("--aggregate")
+        }
+#if DEBUG
+        if let debugLaunchDiffViewerProcessHandler {
+            debugLaunchDiffViewerProcessHandler(arguments)
+            return true
+        }
+#endif
         process.arguments = arguments
         var environment = ProcessInfo.processInfo.environment
         environment["CMUX_SOCKET_PATH"] = socketPath
@@ -13432,6 +13466,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             return true
         }
 
+        if matchConfiguredShortcut(event: event, action: .openReviewTab) {
+            let manager = activeTabManagerForCommands(preferredWindow: mainWindowForShortcutEvent(event))
+            if !openReviewTabForFocusedWorkspace(for: manager) {
+                NSSound.beep()
+            }
+            return true
+        }
+
         if matchConfiguredShortcut(event: event, action: .toggleRightSidebar) {
             // Escape AppKit's performKeyEquivalent animation context. Without
             // deferring the toggle, NSAnimationContext implicitly animates the
@@ -15401,6 +15443,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                 tabManager = context.tabManager
                 defer { tabManager = previousTabManager }
                 guard openBrowserAndFocusAddressBar(insertAtEnd: true) != nil else {
+                    return false
+                }
+                onExecuted?()
+                return true
+            case .newReviewTab:
+                guard openReviewTabForFocusedWorkspace(for: context.tabManager) else {
                     return false
                 }
                 onExecuted?()

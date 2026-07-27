@@ -114,10 +114,18 @@ function effectiveSpawnModel(def: ProviderDef, options: Record<string, OptionVal
     : def.defaultModel ?? def.models?.[0]?.value ?? "";
 }
 
-function commandForSession(def: ProviderDef, options: Record<string, OptionValue>): string[] {
+function commandForSession(
+  def: ProviderDef,
+  options: Record<string, OptionValue>,
+  reviewOnly?: { sandboxProfile: string; args: string[] },
+): string[] {
   const cmd = [...(def.cmd ?? [])];
   if (def.models?.length) {
     cmd.push("--model", effectiveSpawnModel(def, options));
+  }
+  if (reviewOnly && def.id === "copilot") {
+    cmd.push(...reviewOnly.args);
+    return ["/usr/bin/sandbox-exec", "-p", reviewOnly.sandboxProfile, ...cmd];
   }
   return cmd;
 }
@@ -138,7 +146,8 @@ async function ensureAcp(sess: SessionCtx, def: ProviderDef): Promise<AcpState> 
 
 async function startAcp(sess: SessionCtx, def: ProviderDef): Promise<AcpState> {
   const spawnModel = effectiveSpawnModel(def, sess.startOptions);
-  const cmd = commandForSession(def, sess.startOptions);
+  const reviewOnly = sess.internal.reviewOnly as { sandboxProfile: string; args: string[] } | undefined;
+  const cmd = commandForSession(def, sess.startOptions, reviewOnly);
   const autoApprove = typeof sess.startOptions.autoApprove === "boolean" ? sess.startOptions.autoApprove : sess.autoApprove;
   if (autoApprove && def.autoApproveArgs) cmd.push(...def.autoApproveArgs);
   const proc = Bun.spawn(cmd, {
@@ -469,10 +478,11 @@ function handleAgentMessage(sess: SessionCtx, st: AcpState, def: ProviderDef, ms
     // though auto-approve is off. "cancelled" is the spec's no-selection
     // outcome.
     const reject = options.find((o) => o.kind?.startsWith("reject"));
-    const choice = st.autoApprove && allow ? allow : reject;
+    const reviewOnly = sess.internal.reviewOnly != null;
+    const choice = !reviewOnly && st.autoApprove && allow ? allow : reject;
     if (choice !== allow) {
       const tc = msg.params?.toolCall;
-      sess.emit({ kind: "status", text: `denied: ${truncate(tc?.title ?? "tool", 120)} (auto-approve is off)` });
+      sess.emit({ kind: "status", text: `denied: ${truncate(tc?.title ?? "tool", 120)} (${reviewOnly ? "review-only" : "auto-approve is off"})` });
     }
     writeMsg({
       jsonrpc: "2.0",

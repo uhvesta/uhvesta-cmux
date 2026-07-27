@@ -15,6 +15,9 @@ extension KeyboardShortcutSettings.Action {
              .diffViewerOpenFileSearch,
              .diffViewerNextFile,
              .diffViewerPreviousFile,
+             .diffViewerNextHunk,
+             .diffViewerPreviousHunk,
+             .diffViewerComment,
              .fileExplorerOpenSelection,
              .fileExplorerOpenSelectionFinderAlias:
             return true
@@ -35,7 +38,10 @@ extension KeyboardShortcutSettings.Action {
              .diffViewerScrollToTop,
              .diffViewerOpenFileSearch,
              .diffViewerNextFile,
-             .diffViewerPreviousFile:
+             .diffViewerPreviousFile,
+             .diffViewerNextHunk,
+             .diffViewerPreviousHunk,
+             .diffViewerComment:
             return true
         default:
             return false
@@ -198,6 +204,8 @@ extension KeyboardShortcutSettings.Action {
              .diffViewerScrollToTop:
             return .viewerPanel
         case .diffViewerOpenFileSearch, .diffViewerNextFile, .diffViewerPreviousFile:
+            return .browserPanel
+        case .diffViewerNextHunk, .diffViewerPreviousHunk, .diffViewerComment:
             return .browserPanel
         case .commandPaletteNext, .commandPalettePrevious:
             return .commandPaletteVisible

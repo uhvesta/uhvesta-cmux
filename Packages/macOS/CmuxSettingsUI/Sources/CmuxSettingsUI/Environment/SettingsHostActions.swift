@@ -182,6 +182,24 @@ public protocol SettingsHostActions: AnyObject {
     /// Applies the host-side OS `AppleLanguages` override for a changed app
     /// language selection.
     func applyLanguageOverride(_ language: AppLanguage)
+
+    /// Returns the active workspace's optional branch-diff base override.
+    func currentWorkspaceDiffBranchBaseRef() -> String?
+
+    /// Persists or clears the active workspace's branch-diff base override.
+    func setCurrentWorkspaceDiffBranchBaseRef(_ value: String?)
+
+    /// Returns the stable identity of the workspace currently selected in the host.
+    func selectedWorkspaceDiffBranchBaseRefID() -> String?
+
+    /// Emits the current stable workspace identity whenever host selection changes.
+    func selectedWorkspaceDiffBranchBaseRefIDUpdates() -> AsyncStream<String?>
+
+    /// Reads a branch-diff base override for one captured stable workspace identity.
+    func workspaceDiffBranchBaseRef(workspaceID: String) -> String?
+
+    /// Persists or clears a branch-diff base override for one captured stable workspace identity.
+    func setWorkspaceDiffBranchBaseRef(_ value: String?, workspaceID: String)
 }
 
 public extension SettingsHostActions {
@@ -199,6 +217,20 @@ public extension SettingsHostActions {
 
     /// Default no-op for package previews and tests without app-language ownership.
     func applyLanguageOverride(_ language: AppLanguage) {}
+
+    func currentWorkspaceDiffBranchBaseRef() -> String? { nil }
+
+    func setCurrentWorkspaceDiffBranchBaseRef(_ value: String?) {}
+
+    func selectedWorkspaceDiffBranchBaseRefID() -> String? { nil }
+
+    func selectedWorkspaceDiffBranchBaseRefIDUpdates() -> AsyncStream<String?> {
+        AsyncStream { $0.finish() }
+    }
+
+    func workspaceDiffBranchBaseRef(workspaceID: String) -> String? { nil }
+
+    func setWorkspaceDiffBranchBaseRef(_ value: String?, workspaceID: String) {}
 
     func openMobilePairingWindow() {}
 

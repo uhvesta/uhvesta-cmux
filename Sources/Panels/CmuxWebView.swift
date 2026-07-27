@@ -309,6 +309,7 @@ final class CmuxWebView: WKWebView {
         .diffViewerScrollDownEmacs, .diffViewerScrollUpEmacs,
         .diffViewerScrollToBottom, .diffViewerScrollToTop,
         .diffViewerOpenFileSearch, .diffViewerNextFile, .diffViewerPreviousFile,
+        .diffViewerNextHunk, .diffViewerPreviousHunk, .diffViewerComment,
     ])
     var allowsFirstResponderAcquisitionEffective: Bool {
         allowsFirstResponderAcquisition || pointerFocusAllowanceDepth > 0

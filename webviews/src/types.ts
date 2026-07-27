@@ -6,7 +6,7 @@ export type DiffViewerPayload = {
   transport?: DiffTransportConfig;
   externalURL?: string;
   labels?: Record<string, string>;
-  layout?: "split" | "unified";
+  layout?: "split" | "unified" | "full";
   layoutSource?: "default" | "explicit";
   pendingReplacement?: boolean;
   statusMessage?: string;

@@ -10,6 +10,7 @@ export type IconName =
   | "dots"
   | "expand"
   | "external"
+  | "full"
   | "eye"
   | "files"
   | "numbers"
@@ -69,6 +70,8 @@ function IconPaths({ name }: { name: IconName }) {
     return <><rect x="4" y="4" width="12" height="12" rx="2" /><rect x="6" y="6" width="3.5" height="8" rx="1" data-diff-deletion="true" /><rect x="10.5" y="6" width="3.5" height="8" rx="1" data-diff-addition="true" /></>;
   case "unified":
     return <><rect x="4" y="4" width="12" height="12" rx="2" /><rect x="6" y="6" width="8" height="3.5" rx="1" data-diff-deletion="true" /><rect x="6" y="10.5" width="8" height="3.5" rx="1" data-diff-addition="true" /></>;
+  case "full":
+    return <><rect x="4" y="3.5" width="12" height="13" rx="2" /><path d="M7 7h6M7 10h6M7 13h6" /></>;
   case "word":
     return <><path d="M3 6h14" /><path d="M3 10h8" /><path d="M3 14h11" /><path d="M14 10h3" /></>;
   case "wrap":

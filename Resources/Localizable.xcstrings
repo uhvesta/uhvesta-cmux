@@ -1,6 +1,62 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "diffViewer.copiedReviewPrompt": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Copied review prompt" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "レビュー用プロンプトをコピーしました" } }
+      }
+    },
+    "diffViewer.copyReviewPrompt": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Copy review prompt" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "レビュー用プロンプトをコピー" } }
+      }
+    },
+    "diffViewer.fullFile": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Full File" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "ファイル全体" } }
+      }
+    },
+    "diffViewer.queuedReviewPrompt": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Review prompt queued for the next terminal submission" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "次のターミナル送信にレビュー用プロンプトを追加しました" } }
+      }
+    },
+    "diffViewer.repository": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Repository" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "リポジトリ" } }
+      }
+    },
+    "diffViewer.sendReviewPrompt": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Send review prompt to terminal" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "レビュー用プロンプトをターミナルへ送信" } }
+      }
+    },
+    "diffViewer.sendReviewPromptFailed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Could not queue review prompt" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "レビュー用プロンプトを追加できませんでした" } }
+      }
+    },
+    "diffViewer.switchToFullFile": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Switch to Full File" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "ファイル全体表示に切り替え" } }
+      }
+    },
     "about.appName": {
       "extractionState": "manual",
       "localizations": {
@@ -55683,6 +55739,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "標籤頁"
+          }
+        }
+      }
+    },
+    "command.newReviewTab.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "New Review Tab"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "新しいレビュータブ"
           }
         }
       }
@@ -145429,6 +145502,125 @@
         }
       }
     },
+    "settings.app.diffViewerBranchBaseRef": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Default Branch Diff Base"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ブランチ差分の既定ベース"
+          }
+        }
+      }
+    },
+    "settings.app.diffViewerBranchBaseRef.placeholder": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "e.g. origin/main"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "例: origin/main"
+          }
+        }
+      }
+    },
+    "settings.app.diffViewerBranchBaseRef.subtitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Use this ref for branch diffs when set. Leave empty to use cmux's existing automatic detection."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "設定するとブランチ差分でこの ref を使います。空欄にすると cmux の既存の自動検出を使います。"
+          }
+        }
+      }
+    },
+    "settings.app.workspaceDiffBranchBaseRef": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Active Workspace Branch Diff Base"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "選択中ワークスペースのブランチ差分ベース"
+          }
+        }
+      }
+    },
+    "settings.app.workspaceDiffBranchBaseRef.placeholder": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "e.g. upstream/main"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "例: upstream/main"
+          }
+        }
+      }
+    },
+    "settings.app.workspaceDiffBranchBaseRef.subtitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Overrides the default above for the currently selected workspace. Leave empty to remove the workspace override."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "現在選択中のワークスペースで上記の既定値を上書きします。空欄にするとワークスペースの上書きを解除します。"
+          }
+        }
+      }
+    },
+    "settings.app.workspaceDiffBranchBaseRef.clear": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Clear"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "消去"
+          }
+        }
+      }
+    },
     "settings.app.renameSelectsName": {
       "extractionState": "manual",
       "localizations": {
@@ -197338,6 +197530,23 @@
         }
       }
     },
+    "shortcut.openReviewTab.label": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open Review Tab"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "レビュータブを開く"
+          }
+        }
+      }
+    },
     "shortcut.pressShortcut.prompt": {
       "extractionState": "manual",
       "localizations": {
@@ -216041,13 +216250,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Copilot"
+            "value": "GitHub Copilot"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "Copilot"
+            "value": "GitHub Copilot"
           }
         }
       }
@@ -242146,6 +242355,97 @@
             "value": "到達可能"
           }
         }
+      }
+    },
+    "diffComments.bridge.malformedReviewQuestion": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Malformed review question." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "レビューの質問の形式が正しくありません。" } }
+      }
+    },
+    "diffComments.bridge.missingReviewPrompt": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Missing review prompt." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "レビュープロンプトがありません。" } }
+      }
+    },
+    "diffComments.bridge.noPendingReviewComments": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "There are no pending review comments to send." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "送信する未送信のレビューコメントがありません。" } }
+      }
+    },
+    "diffComments.bridge.reviewQuestionsCannotEdit": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Review questions cannot be edited. Delete the question and ask again." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "レビューの質問は編集できません。削除してからもう一度質問してください。" } }
+      }
+    },
+    "diffComments.bridge.reviewQuestionsUnavailableForRemote": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Copilot questions are unavailable for SSH review. Regular comments and review prompts still work." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "SSH レビューでは Copilot への質問は利用できません。通常のコメントとレビュープロンプトは引き続き利用できます。" } }
+      }
+    },
+    "diffComments.copilot.author": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "GitHub Copilot" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "GitHub Copilot" } }
+      }
+    },
+    "diffComments.copilot.emptyAnswer": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Copilot completed without a text response." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "Copilot はテキストの回答を返さずに完了しました。" } }
+      }
+    },
+    "diffComments.copilot.failedAnswer": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Copilot couldn't answer this question." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "Copilot はこの質問に回答できませんでした。" } }
+      }
+    },
+    "diffComments.copilot.pendingAnswer": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Copilot is preparing an answer…" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "Copilot が回答を準備しています…" } }
+      }
+    },
+    "notification.reviewQuestion.completed.subtitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Review question" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "レビューの質問" } }
+      }
+    },
+    "notification.reviewQuestion.completed.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Copilot answer ready" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "Copilot の回答が届きました" } }
+      }
+    },
+    "notification.reviewQuestion.failed.subtitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Review question" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "レビューの質問" } }
+      }
+    },
+    "notification.reviewQuestion.failed.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Copilot question failed" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "Copilot への質問に失敗しました" } }
       }
     }
   },

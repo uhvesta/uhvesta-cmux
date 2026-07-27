@@ -287,6 +287,21 @@ Default: `unified`.
 
 The toolbar layout toggle persists the last user choice for future generated diff viewers. Passing `cmux diff --layout split` or `cmux diff --layout unified` overrides both the saved toolbar choice and this default for that invocation.
 
+## Aggregate review tabs and remote review
+
+`shortcuts.bindings.openReviewTab` defaults to Ctrl-Command-Shift-R. It opens one review tab from the focused workspace directory and discovers each leaf Git repository below that directory. A repository is treated as a leaf, so nested repositories are not added separately.
+
+Use the same aggregate view explicitly from the CLI:
+
+```sh
+cmux diff --aggregate --cwd /path/to/review-root --unstaged
+cmux diff --ssh build-host:/srv/project --branch
+```
+
+The SSH form starts a one-shot `cmux review-companion` process through SSH stdio. It returns a JSON manifest and patch data over that connection; it does not start a daemon or listen on a port. The remote machine needs a compatible `cmux` executable in `PATH`, or pass `--remote-cmux /absolute/path/to/cmux`.
+
+The review-panel motions are configurable through `shortcuts.bindings.diffViewerPreviousHunk` (`h`), `diffViewerNextHunk` (`l`), and `diffViewerComment` (`c`). They are active only while the diff viewer owns keyboard focus.
+
 ## `sidebar.beta.workspaceTodos.checklistStyle`
 
 Workspace todos are always available. Status is inferred from live signals (agent needs input / agent running / open PR / merged PRs / dirty tree) and can be pinned manually from the glyph's status popover, the row's context menu (Status submenu, Mark as Done), the command palette, or `cmux workspace status set <lane|auto>`; checklists are managed from the row, the workspace todo pane (`cmux todo open`), `cmux todo ...`, or by agents over the control socket.

@@ -69,6 +69,7 @@ extension CmuxSettingsFileStore {
                     "keepWorkspaceOpenWhenClosingLastSurface": !SettingCatalog().app.keepWorkspaceOpenWhenClosingLastSurface.defaultValue,
                     "focusPaneOnFirstClick": PaneFirstClickFocusSettings.defaultEnabled,
                     "preferredEditor": "",
+                    "diffViewerBranchBaseRef": "",
                     "openSupportedFilesInCmux": AppCatalogSection().openSupportedFilesInCmux.defaultValue,
                     "openMarkdownInCmuxViewer": AppCatalogSection().openMarkdownInCmuxViewer.defaultValue,
                     "reorderOnNotification": SettingCatalog().app.reorderOnNotification.defaultValue,

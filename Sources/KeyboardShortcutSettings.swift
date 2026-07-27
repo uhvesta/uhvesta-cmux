@@ -185,6 +185,7 @@ enum KeyboardShortcutSettings {
         case toggleBrowserDesignMode
         case toggleReactGrab
         case openDiffViewer
+        case openReviewTab
         case diffViewerScrollDown
         case diffViewerScrollUp
         case diffViewerScrollHalfPageDown, diffViewerScrollHalfPageUp
@@ -193,6 +194,8 @@ enum KeyboardShortcutSettings {
         case diffViewerScrollToTop
         case diffViewerOpenFileSearch
         case diffViewerNextFile, diffViewerPreviousFile
+        case diffViewerNextHunk, diffViewerPreviousHunk
+        case diffViewerComment
 
         var id: String { rawValue }
 
@@ -314,6 +317,7 @@ enum KeyboardShortcutSettings {
             case .toggleBrowserDesignMode: return String(localized: "shortcut.toggleBrowserDesignMode.label", defaultValue: "Toggle Browser Design Mode")
             case .toggleReactGrab: return String(localized: "shortcut.toggleReactGrab.label", defaultValue: "Toggle React Grab")
             case .openDiffViewer: return String(localized: "shortcut.openDiffViewer.label", defaultValue: "Open Diff Viewer")
+            case .openReviewTab: return String(localized: "shortcut.openReviewTab.label", defaultValue: "Open Review Tab")
             case .diffViewerScrollDown: return String(localized: "shortcut.diffViewerScrollDown.label", defaultValue: "Viewers: Scroll Down")
             case .diffViewerScrollUp: return String(localized: "shortcut.diffViewerScrollUp.label", defaultValue: "Viewers: Scroll Up")
             case .diffViewerScrollHalfPageDown: return String(localized: "shortcut.diffViewerScrollHalfPageDown.label", defaultValue: "Viewers: Scroll Half Page Down")
@@ -325,6 +329,9 @@ enum KeyboardShortcutSettings {
             case .diffViewerOpenFileSearch: return String(localized: "shortcut.diffViewerOpenFileSearch.label", defaultValue: "Diff Viewer: Open File Search")
             case .diffViewerNextFile: return String(localized: "shortcut.diffViewerNextFile.label", defaultValue: "Diff Viewer: Next File")
             case .diffViewerPreviousFile: return String(localized: "shortcut.diffViewerPreviousFile.label", defaultValue: "Diff Viewer: Previous File")
+            case .diffViewerNextHunk: return String(localized: "shortcut.diffViewerNextHunk.label", defaultValue: "Diff Viewer: Next Hunk")
+            case .diffViewerPreviousHunk: return String(localized: "shortcut.diffViewerPreviousHunk.label", defaultValue: "Diff Viewer: Previous Hunk")
+            case .diffViewerComment: return String(localized: "shortcut.diffViewerComment.label", defaultValue: "Diff Viewer: Add or Edit Comment")
             }
         }
 
@@ -581,6 +588,11 @@ enum KeyboardShortcutSettings {
                 // Cmd+Opt+D, Cmd+Shift+Opt+D). Adding Shift yields a chord that reaches cmux while
                 // keeping the "D for Diff" mnemonic. Rebindable in Settings → Keyboard Shortcuts.
                 return StoredShortcut(key: "d", command: true, shift: true, option: false, control: true)
+            case .openReviewTab:
+                // Cmd+Shift+R is Rename Workspace and Cmd+R reloads the focused browser.
+                // Ctrl+Cmd+Shift+R is unclaimed by the default shortcut registry and remains
+                // configurable through Settings and cmux.json.
+                return StoredShortcut(key: "r", command: true, shift: true, option: false, control: true)
             case .diffViewerScrollDown:
                 return StoredShortcut(key: "j", command: false, shift: false, option: false, control: false)
             case .diffViewerScrollUp:
@@ -612,6 +624,12 @@ enum KeyboardShortcutSettings {
                     first: ShortcutStroke(key: "[", command: false, shift: false, option: false, control: false),
                     second: ShortcutStroke(key: "f", command: false, shift: false, option: false, control: false)
                 )
+            case .diffViewerNextHunk:
+                return StoredShortcut(key: "l", command: false, shift: false, option: false, control: false)
+            case .diffViewerPreviousHunk:
+                return StoredShortcut(key: "h", command: false, shift: false, option: false, control: false)
+            case .diffViewerComment:
+                return StoredShortcut(key: "c", command: false, shift: false, option: false, control: false)
             }
         }
 
