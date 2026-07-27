@@ -162,6 +162,25 @@ final class DiffCommentsBridge: NSObject, WKScriptMessageHandlerWithReply {
         return parts[0]
     }
 
+    /// Chooses a terminal without changing the workspace's focused panel.
+    ///
+    /// A review panel normally owns focus while this action runs, so the most
+    /// recently used terminal is preferred before the stable visual ordering.
+    static func reviewPromptTerminalPanelID(
+        focusedPanelID: UUID?,
+        rememberedTerminalPanelID: UUID?,
+        orderedPanelIDs: [UUID],
+        terminalPanelIDs: Set<UUID>
+    ) -> UUID? {
+        if let focusedPanelID, terminalPanelIDs.contains(focusedPanelID) {
+            return focusedPanelID
+        }
+        if let rememberedTerminalPanelID, terminalPanelIDs.contains(rememberedTerminalPanelID) {
+            return rememberedTerminalPanelID
+        }
+        return orderedPanelIDs.first(where: terminalPanelIDs.contains)
+    }
+
     private func handle(body: Any, webView: WKWebView?) async throws -> Any {
         guard let body = body as? [String: Any],
               let method = body["method"] as? String else {
@@ -262,12 +281,50 @@ final class DiffCommentsBridge: NSObject, WKScriptMessageHandlerWithReply {
                     defaultValue: "There are no pending review comments to send."
                 ))
             }
-            DiffCommentSubmissionPool.shared.queueReviewBundle(
-                submissionText: reviewPrompt,
-                consumptionTargets: targets,
-                workspaceId: workspace.id
+            let terminalPanelIDs = Set(workspace.panels.compactMap { id, panel in
+                panel is TerminalPanel ? id : nil
+            })
+            guard let terminalPanelID = Self.reviewPromptTerminalPanelID(
+                focusedPanelID: workspace.focusedPanelId,
+                rememberedTerminalPanelID: workspace.lastTerminalConfigInheritancePanelId,
+                orderedPanelIDs: workspace.orderedPanelIds,
+                terminalPanelIDs: terminalPanelIDs
+            ),
+            let terminalPanel = workspace.terminalPanel(for: terminalPanelID) else {
+                throw BridgeError.invalidRequest(String(
+                    localized: "diffComments.bridge.noTerminalForReviewPrompt",
+                    defaultValue: "Open a terminal in this workspace before sending the review prompt."
+                ))
+            }
+            let terminalAgentContext = WorkspaceContentView.terminalAgentContext(
+                panel: terminalPanel,
+                workspace: workspace
             )
-            return ["queued": targets.count]
+            let didSubmit = await withCheckedContinuation { continuation in
+                TextBoxSubmit.send(
+                    reviewPrompt,
+                    via: terminalPanel.surface,
+                    terminalAgentContext: terminalAgentContext
+                ) { completion in
+                    continuation.resume(returning: completion.didSubmit)
+                }
+            }
+            guard didSubmit else {
+                throw BridgeError.invalidRequest(String(
+                    localized: "diffComments.bridge.sendReviewPromptFailed",
+                    defaultValue: "Could not send the review prompt to the terminal."
+                ))
+            }
+            for (repoRoot, repoTargets) in Dictionary(grouping: targets, by: \.repoRoot) {
+                scopedStore.markConsumed(ids: repoTargets.map(\.commentId), repoRoot: repoRoot)
+            }
+            for target in targets {
+                DiffCommentSubmissionPool.shared.removePending(
+                    commentId: target.commentId,
+                    workspaceId: workspace.id
+                )
+            }
+            return ["sent": targets.count]
         case "comments.ask":
             guard let repoRoot, !repoRoot.isEmpty else { throw BridgeError.invalidRequest("Missing repoRoot") }
             return try await ask(

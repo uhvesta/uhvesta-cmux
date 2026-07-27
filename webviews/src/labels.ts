@@ -81,9 +81,9 @@ const DEFAULT_DIFF_VIEWER_LABELS = {
   switchToSplitDiff: "Switch to split diff",
   switchToFullFile: "Switch to Full File",
   switchToUnifiedDiff: "Switch to unified diff",
-  queuedReviewPrompt: "Review prompt queued for the next terminal submission",
+  queuedReviewPrompt: "Review prompt sent to terminal",
   sendReviewPrompt: "Send review prompt to terminal",
-  sendReviewPromptFailed: "Could not queue review prompt",
+  sendReviewPromptFailed: "Could not send review prompt to terminal",
   untitled: "Untitled",
   outdatedComment: "Outdated",
 } as const;
@@ -97,9 +97,9 @@ const JAPANESE_LOCAL_FALLBACKS: Partial<Record<keyof typeof DEFAULT_DIFF_VIEWER_
   askImmutable: "レビューの質問は編集できません。削除してからもう一度質問してください。",
   askUnavailableRemote: "SSH レビューでは Copilot への質問は利用できません。通常のコメントとレビュープロンプトは引き続き利用できます。",
   fullFile: "ファイル全体",
-  queuedReviewPrompt: "次のターミナル送信にレビュー用プロンプトを追加しました",
+  queuedReviewPrompt: "レビュー用プロンプトをターミナルへ送信しました",
   sendReviewPrompt: "レビュー用プロンプトをターミナルへ送信",
-  sendReviewPromptFailed: "レビュー用プロンプトを追加できませんでした",
+  sendReviewPromptFailed: "レビュー用プロンプトをターミナルへ送信できませんでした",
   switchToFullFile: "ファイル全体表示に切り替え",
 };
 

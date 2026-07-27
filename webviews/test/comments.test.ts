@@ -117,15 +117,15 @@ test("commentSubmissionText formats the submission text", () => {
 });
 
 test("commentSubmissionText includes only the highlighted code when parsed diff context is available", () => {
-  const withContent = {
+  const withContent: CommentFileDiff = {
     ...fileDiff,
     hunks: [{
-      ...fileDiff.hunks[0],
+      ...fileDiff.hunks![0],
       hunkContent: [
-        { type: "context", lines: 2, additionLineIndex: 0, deletionLineIndex: 0 },
-        { type: "change", additions: 3, additionLineIndex: 0, deletions: 2, deletionLineIndex: 0 },
+        { type: "context" as const, lines: 2, additionLineIndex: 0, deletionLineIndex: 0 },
+        { type: "change" as const, additions: 3, additionLineIndex: 0, deletions: 2, deletionLineIndex: 0 },
       ],
-    }, fileDiff.hunks[1]],
+    }, fileDiff.hunks![1]],
   };
   const submission = commentSubmissionText(
     comment({ startLine: 11, endLine: 12, lineText: "const c = 3;" }),

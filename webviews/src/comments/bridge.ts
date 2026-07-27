@@ -94,9 +94,9 @@ export async function sendReviewPrompt(
   reviewPrompt: string,
   commentTargets: readonly { id: string; repoRoot: string }[],
 ): Promise<number> {
-  const value = await callDiffComments<{ queued?: number }>("comments.sendReviewPrompt", {
+  const value = await callDiffComments<{ sent?: number }>("comments.sendReviewPrompt", {
     reviewPrompt,
     commentTargets,
   });
-  return typeof value?.queued === "number" ? value.queued : 0;
+  return typeof value?.sent === "number" ? value.sent : 0;
 }
