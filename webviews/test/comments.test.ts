@@ -8,6 +8,7 @@ import {
 } from "../src/comments/annotations";
 import { commentDisplayName, commentSubmissionText } from "../src/comments/format";
 import { resolveCommentLabels } from "../src/comments/labels";
+import { createDiffViewerLabelResolver } from "../src/labels";
 import type { DiffCommentRecord } from "../src/comments/types";
 import type { DiffItem } from "../src/diff-stream";
 
@@ -189,10 +190,24 @@ test("read-only /ask answers are presentation children, not new inline feedback"
   expect(sidebarCommentEntries([item()], [question, answer])).toHaveLength(1);
 });
 
-test("resolveCommentLabels prefers payload labels and falls back to English", () => {
-  const labels = resolveCommentLabels({ labels: { comments: "コメント" } });
+test("resolveCommentLabels uses the required localized diff viewer payload", () => {
+  const labels = resolveCommentLabels(createDiffViewerLabelResolver({
+    comments: "コメント",
+    addComment: "コメントを追加",
+    commentPlaceholder: "コメントを書く",
+    saveComment: "コメント",
+    cancelComment: "キャンセル",
+    deleteComment: "削除",
+    editComment: "編集",
+    outdatedComment: "古いコメント",
+    noComments: "コメントはありません",
+    answerFrom: "{author} からの回答",
+    askComment: "Copilot に質問",
+    askImmutable: "編集できません",
+    askUnavailableRemote: "SSH では利用できません",
+  }, { assertMissing: true }));
   expect(labels.comments).toBe("コメント");
-  expect(labels.addComment).toBe("Add comment");
+  expect(labels.askUnavailableRemote).toBe("SSH では利用できません");
 });
 
 test("diffExcerptFor renders paired -/+ rows with trimmed context", async () => {

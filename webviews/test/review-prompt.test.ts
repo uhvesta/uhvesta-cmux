@@ -18,16 +18,17 @@ function comment(overrides: Partial<DiffCommentRecord> = {}): DiffCommentRecord 
   };
 }
 
-test("aggregate review prompt groups feedback by repository and excludes answers and questions", () => {
+test("aggregate review prompt groups sibling repositories by persisted repository label, never path", () => {
   const prompt = reviewPrompt([
     comment({ id: "answer", parentId: "feedback-1", readOnly: true, message: "Because the value is shared." }),
-    comment({ id: "question", filePath: "repo-b/src/question.ts", message: "/ask Is this safe?" }),
-    comment({ id: "feedback-2", filePath: "repo-b/src/next.ts", repositoryLabel: "second repository" }),
-    comment(),
+    comment({ id: "question", filePath: "src/question.ts", repositoryLabel: "repo-b", message: "/ask Is this safe?" }),
+    comment({ id: "feedback-2", filePath: "src/index.ts", repositoryLabel: "repo-b" }),
+    comment({ filePath: "src/index.ts", repositoryLabel: "repo-a" }),
   ]);
 
   expect(prompt).toContain("## Repository: `repo-a`");
-  expect(prompt).toContain("## Repository: `second repository`");
+  expect(prompt).toContain("## Repository: `repo-b`");
+  expect(prompt).not.toContain("## Repository: `src`");
   expect(prompt).toContain("### Feedback 1");
   expect(prompt).toContain("### Feedback 2");
   expect(prompt).not.toContain("Because the value is shared.");

@@ -841,7 +841,80 @@ final class CMUXOpenCommandTests: XCTestCase {
         XCTAssertEqual(returnedManifest["source"] as? String, "branch")
         let repositories = try XCTUnwrap(returnedManifest["repositories"] as? [[String: Any]])
         XCTAssertEqual(repositories.first?["baseRef"] as? String, hostileBase)
+        XCTAssertEqual(
+            repositories.first?["root"] as? String,
+            "ssh://review@example.invalid\(hostileRoot)/repo with spaces"
+        )
         XCTAssertTrue(result.patch.contains("+after"))
+    }
+
+    func testRemoteReviewQualifiesSameChildPathWithItsSSHHost() throws {
+        let cliPath = try bundledCLIPath()
+        let fixtureURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cmux-review-remote-owner-\(UUID().uuidString)", isDirectory: true)
+        let fakeSSHURL = fixtureURL.appendingPathComponent("fake-ssh", isDirectory: false)
+        let manifestURL = fixtureURL.appendingPathComponent("manifest.json", isDirectory: false)
+        defer { try? FileManager.default.removeItem(at: fixtureURL) }
+
+        try FileManager.default.createDirectory(at: fixtureURL, withIntermediateDirectories: true)
+        let manifest: [String: Any] = [
+            "schemaVersion": 1,
+            "root": "/srv/workspace",
+            "source": "unstaged",
+            "repositories": [[
+                "id": "repo",
+                "root": "/srv/workspace/repo",
+                "label": "repo",
+                "patch": "diff --git a/repo/tracked.txt b/repo/tracked.txt\n--- a/repo/tracked.txt\n+++ b/repo/tracked.txt\n@@ -1 +1 @@\n-before\n+after\n",
+            ]],
+        ]
+        try JSONSerialization.data(withJSONObject: manifest, options: [.sortedKeys])
+            .write(to: manifestURL, options: .atomic)
+        try "#!/bin/sh\\ncat \"$CMUX_TEST_REVIEW_MANIFEST\"\\n"
+            .write(to: fakeSSHURL, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: fakeSSHURL.path)
+
+        func remoteChildOwner(for destination: String) throws -> String {
+            let result = try runDiffCLIAndReadHTML(
+                cliPath: cliPath,
+                arguments: ["diff", "--ssh", "\(destination):/srv/workspace"],
+                environmentOverrides: [
+                    "CMUX_REVIEW_SSH_EXECUTABLE": fakeSSHURL.path,
+                    "CMUX_TEST_REVIEW_MANIFEST": manifestURL.path,
+                ]
+            )
+            let payload = try diffViewerPayload(from: result.html)
+            let returnedManifest = try XCTUnwrap(payload["aggregateManifest"] as? [String: Any])
+            let repositories = try XCTUnwrap(returnedManifest["repositories"] as? [[String: Any]])
+            return try XCTUnwrap(repositories.first?["root"] as? String)
+        }
+
+        let firstOwner = try remoteChildOwner(for: "alice@host-one.example")
+        let secondOwner = try remoteChildOwner(for: "alice@host-two.example")
+        XCTAssertEqual(firstOwner, "ssh://alice@host-one.example/srv/workspace/repo")
+        XCTAssertEqual(secondOwner, "ssh://alice@host-two.example/srv/workspace/repo")
+        XCTAssertNotEqual(firstOwner, secondOwner)
+    }
+
+    func testRemoteReviewRejectsCompanionRepositoryOutsideRequestedRoot() throws {
+        let cliPath = try bundledCLIPath()
+        let fixtureURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cmux-review-hostile-child-\(UUID().uuidString)", isDirectory: true)
+        let fakeSSHURL = fixtureURL.appendingPathComponent("fake-ssh", isDirectory: false)
+        defer { try? FileManager.default.removeItem(at: fixtureURL) }
+
+        try FileManager.default.createDirectory(at: fixtureURL, withIntermediateDirectories: true)
+        try "#!/bin/sh\\nprintf '%s' '{\"schemaVersion\":1,\"root\":\"/srv/workspace\",\"source\":\"unstaged\",\"repositories\":[{\"id\":\"escape\",\"root\":\"/srv/workspace/../../private\",\"label\":\"escape\",\"patch\":\"\"}]}'\\n"
+            .write(to: fakeSSHURL, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: fakeSSHURL.path)
+
+        let result = runDiffCLIExpectingNoOpen(
+            cliPath: cliPath,
+            arguments: ["diff", "--ssh", "review@example.invalid:/srv/workspace"],
+            environmentOverrides: ["CMUX_REVIEW_SSH_EXECUTABLE": fakeSSHURL.path]
+        )
+        XCTAssertNotEqual(result.status, 0)
+        XCTAssertTrue(result.stderr.contains("invalid repository metadata"), result.stderr)
     }
 
     func testRemoteReviewCompanionReportsProtocolAndAvailabilityFailuresBeforeOpeningViewer() throws {
