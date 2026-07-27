@@ -269,10 +269,17 @@ fn rpc_git_sessions_match_git_without_starting_a_server() {
     run_git(&repo, &["init"]);
     run_git(&repo, &["config", "user.name", "cmux tests"]);
     run_git(&repo, &["config", "user.email", "cmux@example.invalid"]);
-    std::fs::write(repo.join("story.txt"), b"one\n").expect("write initial file");
+    let initial_story = (1..=20)
+        .map(|line| format!("line {line}\n"))
+        .collect::<String>();
+    std::fs::write(repo.join("story.txt"), &initial_story).expect("write initial file");
     run_git(&repo, &["add", "story.txt"]);
     run_git(&repo, &["commit", "-m", "initial"]);
-    std::fs::write(repo.join("story.txt"), b"one\ntwo\n").expect("write changed file");
+    std::fs::write(
+        repo.join("story.txt"),
+        initial_story.replace("line 10\n", "line ten changed\n"),
+    )
+    .expect("write changed file");
 
     let token = "0123456789abcdef";
     let shell = root.join("viewer.html");
@@ -308,7 +315,14 @@ fn rpc_git_sessions_match_git_without_starting_a_server() {
         &repo,
         token,
         &serde_json::json!({"kind": "unstaged", "repoRoot": repo}),
-        &["diff", "--no-ext-diff", "--no-color", "--binary", "--"],
+        &[
+            "diff",
+            "--no-ext-diff",
+            "--no-color",
+            "--binary",
+            "--unified=2147483647",
+            "--",
+        ],
     );
     run_git(&repo, &["add", "story.txt"]);
     assert_session_matches_git(
@@ -321,6 +335,7 @@ fn rpc_git_sessions_match_git_without_starting_a_server() {
             "--no-ext-diff",
             "--no-color",
             "--binary",
+            "--unified=2147483647",
             "--cached",
             "--",
         ],
@@ -335,6 +350,7 @@ fn rpc_git_sessions_match_git_without_starting_a_server() {
             "--no-ext-diff",
             "--no-color",
             "--binary",
+            "--unified=2147483647",
             "HEAD",
             "--",
         ],
@@ -349,6 +365,7 @@ fn rpc_git_sessions_match_git_without_starting_a_server() {
             "--no-ext-diff",
             "--no-color",
             "--binary",
+            "--unified=2147483647",
             "HEAD",
             "--",
         ],
@@ -363,7 +380,14 @@ fn assert_overlapping_sessions_remain_independently_closable(
     token: &str,
 ) {
     let source = serde_json::json!({"kind": "unstaged", "repoRoot": repo});
-    let git_arguments = ["diff", "--no-ext-diff", "--no-color", "--binary", "--"];
+    let git_arguments = [
+        "diff",
+        "--no-ext-diff",
+        "--no-color",
+        "--binary",
+        "--unified=2147483647",
+        "--",
+    ];
     let (abandoned_session, abandoned_path) =
         open_session_matches_git(root, repo, token, &source, &git_arguments);
     let (replacement_session, replacement_path) =
