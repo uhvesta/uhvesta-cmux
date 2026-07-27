@@ -37,7 +37,7 @@ import type {
 } from "./comments/types";
 import { resolveDiffFileLanguage, resolveDiffPreloadLanguages } from "./diff-language";
 import { fileName, type AggregateRepository, type DiffItem, type FileTreeSource, type StreamMetrics, streamPatch } from "./diff-stream";
-import { decorateRenderedHunkGutters, DiffHeaderMetadata, toggleExpandedHunkID } from "./diff-metadata";
+import { decorateRenderedHunkGutters, DiffHeaderMetadata, scopedHunkID, toggleExpandedHunkID } from "./diff-metadata";
 import { applyPierreFileTreeGitStatus, planPierreFileTreeRefresh, selectPierreFileTreePath } from "./file-tree-refresh";
 import { Icon, type IconName } from "./icons";
 import { createDiffViewerLabelResolver, shouldAssertMissingLabels } from "./labels";
@@ -335,8 +335,9 @@ export function App({ config, initialStatus }: ConfigProps) {
   });
   const renderedCodeViewOptions = codeViewOptions(state.options, appearance);
   const toggleFullFileHunk = useCallback((item: DiffItem, hunkIndex: number, hunkId: string) => {
-    const wasExpanded = expandedFullFileHunks.has(hunkId);
-    setExpandedFullFileHunks((current) => toggleExpandedHunkID(current, hunkId));
+    const stateKey = scopedHunkID(item.id, hunkId);
+    const wasExpanded = expandedFullFileHunks.has(stateKey);
+    setExpandedFullFileHunks((current) => toggleExpandedHunkID(current, stateKey));
     if (wasExpanded) {
       // Pierre 1.2 exposes public expansion but no collapse method. Recreate
       // its rendered instances and replay only the remaining stable IDs in
@@ -370,7 +371,9 @@ export function App({ config, initialStatus }: ConfigProps) {
       hunks.forEach((hunk: any, index: number) => {
         const hunkId = hunk?.cmuxHunkId;
         const appliedKey = `${context.item.id}:${hunkId}`;
-        if (typeof hunkId === "string" && expandedFullFileHunks.has(hunkId) && !appliedFullFileHunksRef.current.has(appliedKey)) {
+        if (typeof hunkId === "string"
+          && expandedFullFileHunks.has(scopedHunkID(context.item.id, hunkId))
+          && !appliedFullFileHunksRef.current.has(appliedKey)) {
           appliedFullFileHunksRef.current.add(appliedKey);
           instance?.expandHunk(index, "both", Number.MAX_SAFE_INTEGER);
         }
@@ -708,6 +711,7 @@ export function App({ config, initialStatus }: ConfigProps) {
                     repositoryRoot={(item as DiffItem).commentRepoRoot}
                     repositoryBaseRef={(item as DiffItem).repositoryBaseRef}
                     repositoryStart={(item as DiffItem).repositoryStart}
+                    hunkScope={(item as DiffItem).id}
                     fullFile={state.options.layout === "full"}
                     expandedHunkIDs={expandedFullFileHunks}
                     onExpandHunk={(hunkIndex, hunkId) => toggleFullFileHunk(item as DiffItem, hunkIndex, hunkId)}

@@ -25,6 +25,11 @@ export function toggleExpandedHunkID(
   return next;
 }
 
+/** Keeps semantically identical aggregate hunks independent by rendered item. */
+export function scopedHunkID(itemId: string, hunkId: string): string {
+  return `${itemId}\u0000${hunkId}`;
+}
+
 export function annotateDiffMetadata(fileDiff: any, patchText?: string): void {
   if (fileDiff == null || typeof fileDiff !== "object") {
     return;
@@ -78,6 +83,7 @@ export function DiffHeaderMetadata({
   repositoryLabel,
   repositoryRoot,
   repositoryStart,
+  hunkScope,
   expandedHunkIDs,
   fullFile,
   onExpandHunk,
@@ -88,6 +94,7 @@ export function DiffHeaderMetadata({
   repositoryLabel?: string;
   repositoryRoot?: string;
   repositoryStart?: boolean;
+  hunkScope?: string;
   expandedHunkIDs?: ReadonlySet<string>;
   fullFile?: boolean;
   onExpandHunk?: (hunkIndex: number, hunkId: string) => void;
@@ -108,7 +115,9 @@ export function DiffHeaderMetadata({
       {fullFile ? <span data-cmux-full-file-hunks>{(fileDiff?.hunks ?? []).map((hunk: any, index: number) => {
         const hunkId = hunk?.cmuxHunkId;
         if (typeof hunkId !== "string") return null;
-        const expanded = expandedHunkIDs?.has(hunkId) ?? false;
+        const expanded = expandedHunkIDs?.has(
+          hunkScope == null ? hunkId : scopedHunkID(hunkScope, hunkId),
+        ) ?? false;
         return (
           <button
             key={hunkId}

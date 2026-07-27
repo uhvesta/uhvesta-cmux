@@ -22,9 +22,18 @@ export function reviewPrompt(comments: readonly DiffCommentRecord[]): string {
     .sort((left, right) => {
       const repository = repositoryLabel(left).localeCompare(repositoryLabel(right));
       if (repository !== 0) return repository;
+      const repositoryIdentity = repositoryKey(left).localeCompare(repositoryKey(right));
+      if (repositoryIdentity !== 0) return repositoryIdentity;
       const path = left.filePath.localeCompare(right.filePath);
       return path !== 0 ? path : left.startLine - right.startLine;
     });
+  const repositoryKeysByLabel = new Map<string, Set<string>>();
+  for (const comment of feedback) {
+    const label = repositoryLabel(comment);
+    const keys = repositoryKeysByLabel.get(label) ?? new Set<string>();
+    keys.add(repositoryKey(comment));
+    repositoryKeysByLabel.set(label, keys);
+  }
   const sections = [
     "# Review feedback",
     "",
@@ -35,10 +44,14 @@ export function reviewPrompt(comments: readonly DiffCommentRecord[]): string {
   }
   let activeRepository: string | null = null;
   for (const [index, comment] of feedback.entries()) {
-    const repository = repositoryLabel(comment);
+    const repository = repositoryKey(comment);
     if (repository !== activeRepository) {
       activeRepository = repository;
-      sections.push("", `## Repository: ${inlineCode(repository)}`);
+      const label = repositoryLabel(comment);
+      const duplicateLabel = (repositoryKeysByLabel.get(label)?.size ?? 0) > 1;
+      const root = comment.repositoryRoot?.trim();
+      const display = duplicateLabel && root ? `${label} (${root})` : label;
+      sections.push("", `## Repository: ${inlineCode(display)}`);
     }
     sections.push(
       "",
@@ -67,6 +80,11 @@ function repositoryLabel(comment: DiffCommentRecord): string {
     return comment.repositoryLabel;
   }
   return "Current repository";
+}
+
+function repositoryKey(comment: DiffCommentRecord): string {
+  const root = comment.repositoryRoot?.trim();
+  return root ? `root:${root}` : `label:${repositoryLabel(comment)}`;
 }
 
 function fallbackFeedback(comment: DiffCommentRecord): string {
