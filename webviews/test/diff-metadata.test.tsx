@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { JSDOM } from "jsdom";
 import { renderToStaticMarkup } from "react-dom/server";
-import { annotateDiffMetadata, annotateHunks, decorateRenderedHunkGutters, DiffHeaderMetadata, fullFileHunkIsExpanded, resolveDiffHeaderMetadata, scopedHunkID, toggleExpandedHunkID } from "../src/diff-metadata";
+import { annotateDiffMetadata, annotateHunks, decorateRenderedHunkGutters, DiffHeaderMetadata, fullFileDiffWithCollapsedHunks, fullFileHunkIsExpanded, resolveDiffHeaderMetadata, scopedHunkID, toggleExpandedHunkID } from "../src/diff-metadata";
 import { createDiffViewerLabelResolver } from "../src/labels";
 
 test("binary and mode-only diffs render explicit localized header metadata", () => {
@@ -112,6 +112,49 @@ test("Full File hunk controls toggle a stable ID without changing other hunks", 
 test("Full File hunk state is scoped to its aggregate repository item", () => {
   expect(scopedHunkID("repo-a:src/example.ts", "semantic-hunk-a"))
     .not.toBe(scopedHunkID("repo-b:src/example.ts", "semantic-hunk-a"));
+});
+
+test("collapsing a Full File hunk gives Pierre real collapsed context while preserving its semantic identity", () => {
+  const fileDiff = {
+    name: "src/example.ts",
+    additionLines: Array.from({ length: 40 }, (_, index) => `new ${index + 1}\n`),
+    deletionLines: Array.from({ length: 40 }, (_, index) => `old ${index + 1}\n`),
+    hunks: [{
+      additionStart: 1,
+      additionCount: 40,
+      additionLineIndex: 0,
+      deletionStart: 1,
+      deletionCount: 40,
+      deletionLineIndex: 0,
+      hunkContent: [
+        { type: "context", lines: 9, additionLineIndex: 0, deletionLineIndex: 0 },
+        { type: "change", additions: 1, deletions: 1, additionLineIndex: 9, deletionLineIndex: 9 },
+        { type: "context", lines: 19, additionLineIndex: 10, deletionLineIndex: 10 },
+        { type: "change", additions: 1, deletions: 1, additionLineIndex: 29, deletionLineIndex: 29 },
+        { type: "context", lines: 10, additionLineIndex: 30, deletionLineIndex: 30 },
+      ],
+      splitLineStart: 0,
+      splitLineCount: 40,
+      unifiedLineStart: 0,
+      unifiedLineCount: 42,
+      noEOFCRAdditions: false,
+      noEOFCRDeletions: false,
+    }],
+  };
+  annotateHunks(fileDiff);
+
+  const hunkId = fileDiff.hunks[0]!.cmuxHunkId;
+  const collapsed = fullFileDiffWithCollapsedHunks(fileDiff, "repo:src/example.ts", new Set([
+    scopedHunkID("repo:src/example.ts", hunkId),
+  ]));
+
+  expect(collapsed).not.toBe(fileDiff);
+  expect(collapsed.hunks).toHaveLength(2);
+  expect(collapsed.hunks.map((hunk: any) => hunk.cmuxHunkId)).toEqual([hunkId, hunkId]);
+  expect(collapsed.hunks.every((hunk: any) => hunk.hunkContent.every((part: any) => part.type === "change"))).toBe(true);
+  expect(collapsed.hunks[0].collapsedBefore).toBe(9);
+  expect(collapsed.hunks[1].collapsedBefore).toBe(19);
+  expect(fileDiff.hunks[0]!.hunkContent.some((part: any) => part.type === "context")).toBe(true);
 });
 
 test("hunk identities survive shifted patch coordinates and an earlier unrelated hunk", () => {

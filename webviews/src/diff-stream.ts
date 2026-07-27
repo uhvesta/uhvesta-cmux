@@ -27,6 +27,8 @@ export type FileStats = {
 };
 
 export type DiffItem = CodeViewItem<CommentAnnotationMetadata> & {
+  /** Original Full File diff retained while the rendered copy has compacted context. */
+  cmuxFullFileSourceDiff?: any;
   /** Canonical repository which owns this file in an aggregate review. */
   commentRepoRoot?: string;
   /** Repository-relative path used as the durable comment anchor. */

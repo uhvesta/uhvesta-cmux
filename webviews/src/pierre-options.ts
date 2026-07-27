@@ -21,14 +21,19 @@ export function supportsGlobalUnchangedContext(layout: DiffViewerOptions["layout
 export function codeViewOptions(
   options: DiffViewerOptions,
   appearance: DiffViewerAppearance,
+  fullFileHasCollapsedHunks = false,
 ): CodeViewOptions<any> {
   return {
     layout: { paddingTop: 0, gap: 1, paddingBottom: 0 },
     diffStyle: options.layout === "split" ? "split" : "unified",
     diffIndicators: options.diffIndicators,
     overflow: options.wordWrap ? "wrap" : "scroll",
-    expandUnchanged: options.layout === "full"
+    // Full File starts expanded. Once an individual hunk is explicitly
+    // collapsed, its derived Pierre input contains real collapsed regions;
+    // the global option must then yield to those per-hunk regions.
+    expandUnchanged: (options.layout === "full" && !fullFileHasCollapsedHunks)
       || (supportsGlobalUnchangedContext(options.layout) && options.expandUnchanged),
+    collapsedContextThreshold: options.layout === "full" && fullFileHasCollapsedHunks ? 0 : undefined,
     disableBackground: !options.showBackgrounds,
     disableLineNumbers: !options.lineNumbers,
     lineHoverHighlight: "number",
