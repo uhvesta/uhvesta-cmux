@@ -243,6 +243,33 @@ final class DiffCommentStoreTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: directory.appendingPathComponent("comments.sqlite3").path))
     }
 
+    func testVersionFourGlobalCommentsRemainGlobalWhenTheyDidNotComeFromLegacyJSON() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("diff-comments-v4-global-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let repoRoot = "/tmp/global-repo"
+        let comment = makeComment(message: "genuine global")
+        do {
+            let store = DiffCommentStore(directoryURL: directory)
+            store.upsert(comment, repoRoot: repoRoot)
+        }
+        var database: OpaquePointer?
+        XCTAssertEqual(
+            sqlite3_open(directory.appendingPathComponent("comments.sqlite3").path, &database),
+            SQLITE_OK
+        )
+        XCTAssertEqual(sqlite3_exec(database, "PRAGMA user_version = 4;", nil, nil, nil), SQLITE_OK)
+        sqlite3_close_v2(database)
+
+        let store = DiffCommentStore(directoryURL: directory)
+        let workspace = store.workspaceStore(
+            for: UUID(uuidString: "AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA")!
+        )
+        XCTAssertTrue(workspace.comments(repoRoot: repoRoot).isEmpty)
+        XCTAssertEqual(store.comments(repoRoot: repoRoot), [comment])
+    }
+
     func testReadOnlyAnswerPersistsWithItsQuestionMetadata() throws {
         let (store, directory) = try makeStore()
         defer { try? FileManager.default.removeItem(at: directory) }
