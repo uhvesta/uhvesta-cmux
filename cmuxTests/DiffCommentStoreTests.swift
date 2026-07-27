@@ -235,6 +235,11 @@ final class DiffCommentStoreTests: XCTestCase {
 
         let store = DiffCommentStore(directoryURL: directory)
         XCTAssertEqual(store.comments(repoRoot: repoRoot), [comment])
+        let workspace = store.workspaceStore(
+            for: UUID(uuidString: "AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA")!
+        )
+        XCTAssertEqual(workspace.comments(repoRoot: repoRoot), [comment])
+        XCTAssertTrue(store.comments(repoRoot: repoRoot).isEmpty)
         XCTAssertTrue(FileManager.default.fileExists(atPath: directory.appendingPathComponent("comments.sqlite3").path))
     }
 
