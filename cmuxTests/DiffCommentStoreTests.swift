@@ -415,6 +415,40 @@ final class DiffCommentSubmissionPoolTests: XCTestCase {
         pool.restorePending([bundle], workspaceId: workspace)
         XCTAssertEqual(pool.pendingCount(workspaceId: workspace), 1)
     }
+
+    func testOrdinaryPendingCommentsConsumeAsOneRepositoryGroupedMarkdownDocument() throws {
+        let pool = DiffCommentSubmissionPool()
+        let workspace = UUID()
+        let first = UUID()
+        let second = UUID()
+        pool.setPending(
+            .init(
+                commentId: first,
+                repoRoot: "/tmp/repo-a",
+                submissionText: "## Review feedback\n\n**File:** `a.swift`\n"
+            ),
+            workspaceId: workspace
+        )
+        pool.setPending(
+            .init(
+                commentId: second,
+                repoRoot: "/tmp/repo-b",
+                submissionText: "## Review feedback\n\n**File:** `b.swift`\n"
+            ),
+            workspaceId: workspace
+        )
+
+        let consumed = pool.consumeAll(workspaceId: workspace)
+        let bundle = try XCTUnwrap(consumed.first)
+        XCTAssertEqual(consumed.count, 1)
+        XCTAssertTrue(bundle.isReviewBundle)
+        XCTAssertEqual(Set(bundle.consumptionTargets.map(\.commentId)), Set([first, second]))
+        XCTAssertTrue(bundle.submissionText.contains("# Review feedback"))
+        XCTAssertTrue(bundle.submissionText.contains("## Repository: `/tmp/repo-a`"))
+        XCTAssertTrue(bundle.submissionText.contains("## Repository: `/tmp/repo-b`"))
+        XCTAssertTrue(bundle.submissionText.contains("### Feedback 1"))
+        XCTAssertTrue(bundle.submissionText.contains("### Feedback 2"))
+    }
 }
 
 final class ReviewQuestionSidecarHistoryTests: XCTestCase {
