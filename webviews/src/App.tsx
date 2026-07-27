@@ -37,7 +37,13 @@ import type {
 } from "./comments/types";
 import { resolveDiffFileLanguage, resolveDiffPreloadLanguages } from "./diff-language";
 import { fileName, type AggregateRepository, type DiffItem, type FileTreeSource, type StreamMetrics, streamPatch } from "./diff-stream";
-import { decorateRenderedHunkGutters, DiffHeaderMetadata } from "./diff-metadata";
+import {
+  decorateRenderedHunkGutters,
+  DiffHeaderMetadata,
+  fullFileDiffWithCollapsedHunks,
+  scopedHunkID,
+  toggleExpandedHunkID,
+} from "./diff-metadata";
 import { applyPierreFileTreeGitStatus, planPierreFileTreeRefresh, selectPierreFileTreePath } from "./file-tree-refresh";
 import { Icon, type IconName } from "./icons";
 import { createDiffViewerLabelResolver, shouldAssertMissingLabels } from "./labels";
@@ -303,6 +309,8 @@ export function App({ config, initialStatus }: ConfigProps) {
   }
   const [activePatchURL, setActivePatchURL] = useState<string | undefined>(payload.patchURL);
   const [state, dispatch] = useReducer(reducer, initialAppState(config, initialStatus));
+  const [collapsedFullFileHunkIDs, setCollapsedFullFileHunkIDs] = useState<ReadonlySet<string>>(() => new Set());
+  const [fullFileContextRevision, setFullFileContextRevision] = useState(0);
   const latestState = useSyncedRef(state);
   const codeViewRef = useRef<CodeViewHandle<any> | null>(null);
   const codeViewScrollTopRef = useRef(0);
@@ -330,7 +338,23 @@ export function App({ config, initialStatus }: ConfigProps) {
     latestState,
     repoRoots: commentRepoRoots,
   });
-  const renderedCodeViewOptions = codeViewOptions(state.options, appearance);
+  const renderedItems = useMemo(() => {
+    if (state.options.layout !== "full" || collapsedFullFileHunkIDs.size === 0) return state.items;
+    return state.items.map((item) => {
+      if (item.type !== "diff" || item.fileDiff == null) return item;
+      return {
+        ...item,
+        cmuxFullFileSourceDiff: item.fileDiff,
+        fileDiff: fullFileDiffWithCollapsedHunks(item.fileDiff, item.id, collapsedFullFileHunkIDs),
+        version: (item.version ?? 0) + fullFileContextRevision,
+      };
+    });
+  }, [collapsedFullFileHunkIDs, fullFileContextRevision, state.items, state.options.layout]);
+  const renderedCodeViewOptions = codeViewOptions(
+    state.options,
+    appearance,
+    state.options.layout === "full" && collapsedFullFileHunkIDs.size > 0,
+  );
   renderedCodeViewOptions.onGutterUtilityClick = comments.onGutterUtilityClick as any;
   renderedCodeViewOptions.onLineClick = ((props: { lineNumber: number; annotationSide: DiffCommentSide }, context: { item: DiffItem }) => {
     navigationCursorRef.current = {
@@ -348,6 +372,10 @@ export function App({ config, initialStatus }: ConfigProps) {
     decorateRenderedHunkGutters(node, context.item.fileDiff);
     CmuxViewerNavigation.refreshRenderedRows?.(viewerContainerRef.current);
   }) as any;
+  const toggleFullFileHunk = useCallback((itemId: string, hunkId: string) => {
+    setCollapsedFullFileHunkIDs((current) => toggleExpandedHunkID(current, scopedHunkID(itemId, hunkId)));
+    setFullFileContextRevision((revision) => revision + 1);
+  }, []);
   const closeActiveSession = useCallback(() => {
     const activeSession = activeSessionRef.current;
     if (!transport) {
@@ -666,18 +694,21 @@ export function App({ config, initialStatus }: ConfigProps) {
                 ref={codeViewRef}
                 className="code-view-root"
                 containerRef={viewerContainerRef}
-                items={state.items}
+                items={renderedItems}
                 onScroll={handleCodeViewScroll}
                 options={renderedCodeViewOptions}
                 renderHeaderMetadata={(item) => (
                   <DiffHeaderMetadata
-                    fileDiff={(item as DiffItem).fileDiff}
+                    fileDiff={(item as DiffItem).cmuxFullFileSourceDiff ?? (item as DiffItem).fileDiff}
                     label={label}
                     repositoryLabel={(item as DiffItem).repositoryLabel}
                     repositoryRoot={(item as DiffItem).commentRepoRoot}
                     repositoryBaseRef={(item as DiffItem).repositoryBaseRef}
                     repositoryStart={(item as DiffItem).repositoryStart}
-                    fullFile={false}
+                    fullFile={state.options.layout === "full"}
+                    hunkScope={(item as DiffItem).id}
+                    collapsedHunkIDs={collapsedFullFileHunkIDs}
+                    onExpandHunk={(_hunkIndex, hunkId) => toggleFullFileHunk((item as DiffItem).id, hunkId)}
                   />
                 )}
                 renderAnnotation={(annotation, item) =>

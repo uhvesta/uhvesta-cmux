@@ -135,3 +135,19 @@ test("Full File renders every unchanged context region", () => {
   expect(supportsGlobalUnchangedContext("full")).toBe(true);
   expect(supportsGlobalUnchangedContext("unified")).toBe(true);
 });
+
+test("Full File yields global expansion when a per-hunk collapse is active", () => {
+  const options = codeViewOptions({
+    collapsed: false,
+    diffIndicators: "bars",
+    expandUnchanged: false,
+    layout: "full",
+    lineNumbers: true,
+    showBackgrounds: true,
+    wordDiffs: false,
+    wordWrap: false,
+  }, {}, true);
+
+  expect(options.expandUnchanged).toBe(false);
+  expect(options.collapsedContextThreshold).toBe(0);
+});

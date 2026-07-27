@@ -39,6 +39,100 @@ export function fullFileHunkIsExpanded(
   return !collapsedHunkIDs.has(scopedHunkID(itemId, hunkId));
 }
 
+/**
+ * Produces the compact Pierre input for explicitly collapsed Full File hunks.
+ *
+ * The source diff stays untouched: it is the durable source for h/l navigation
+ * and semantic hunk IDs. Pierre only supports expanding collapsed inter-hunk
+ * regions, so a fully-expanded Git patch needs its selected hunk context
+ * represented as those regions before Pierre can render it collapsed again.
+ */
+export function fullFileDiffWithCollapsedHunks(
+  fileDiff: any,
+  itemId: string,
+  collapsedHunkIDs: ReadonlySet<string>,
+): any {
+  const sourceHunks = Array.isArray(fileDiff?.hunks) ? fileDiff.hunks : [];
+  if (fileDiff?.isPartial || sourceHunks.length === 0) return fileDiff;
+  const hasCollapsedHunk = sourceHunks.some((hunk: any) => (
+    typeof hunk?.cmuxHunkId === "string" &&
+    collapsedHunkIDs.has(scopedHunkID(itemId, hunk.cmuxHunkId))
+  ));
+  if (!hasCollapsedHunk) return fileDiff;
+
+  const hunks: any[] = [];
+  for (const sourceHunk of sourceHunks) {
+    const hunkId = sourceHunk?.cmuxHunkId;
+    if (typeof hunkId !== "string" || !collapsedHunkIDs.has(scopedHunkID(itemId, hunkId))) {
+      hunks.push({ ...sourceHunk, hunkContent: [...(sourceHunk.hunkContent ?? [])] });
+      continue;
+    }
+    const compactHunks = compactHunkContext(sourceHunk);
+    // A malformed hunk with no change cannot be compacted without losing its
+    // only content, so leave it visible.
+    hunks.push(...(compactHunks.length > 0 ? compactHunks : [{ ...sourceHunk, hunkContent: [...(sourceHunk.hunkContent ?? [])] }]));
+  }
+  return layoutCompactHunks(fileDiff, hunks);
+}
+
+function compactHunkContext(sourceHunk: any): any[] {
+  const content = Array.isArray(sourceHunk?.hunkContent) ? sourceHunk.hunkContent : [];
+  const finalContent = content.at(-1);
+  return content.flatMap((part: any) => {
+    if (part?.type !== "change") return [];
+    const additionStart = sourceHunk.additionStart + (part.additionLineIndex - sourceHunk.additionLineIndex);
+    const deletionStart = sourceHunk.deletionStart + (part.deletionLineIndex - sourceHunk.deletionLineIndex);
+    return [{
+      ...sourceHunk,
+      additionStart,
+      additionCount: part.additions,
+      additionLines: part.additions,
+      additionLineIndex: part.additionLineIndex,
+      deletionStart,
+      deletionCount: part.deletions,
+      deletionLines: part.deletions,
+      deletionLineIndex: part.deletionLineIndex,
+      hunkContent: [{ ...part }],
+      hunkSpecs: undefined,
+      noEOFCRAdditions: part === finalContent ? sourceHunk.noEOFCRAdditions : false,
+      noEOFCRDeletions: part === finalContent ? sourceHunk.noEOFCRDeletions : false,
+    }];
+  });
+}
+
+function layoutCompactHunks(fileDiff: any, hunks: any[]): any {
+  let additionEnd = 0;
+  let splitLineCount = 0;
+  let unifiedLineCount = 0;
+  for (const hunk of hunks) {
+    const collapsedBefore = Math.max(hunk.additionStart - 1 - additionEnd, 0);
+    const hunkSplitLineCount = hunk.hunkContent.reduce((count: number, part: any) => (
+      count + (part.type === "context" ? part.lines : Math.max(part.additions, part.deletions))
+    ), 0);
+    const hunkUnifiedLineCount = hunk.hunkContent.reduce((count: number, part: any) => (
+      count + (part.type === "context" ? part.lines : part.additions + part.deletions)
+    ), 0);
+    hunk.collapsedBefore = collapsedBefore;
+    hunk.splitLineStart = splitLineCount + collapsedBefore;
+    hunk.unifiedLineStart = unifiedLineCount + collapsedBefore;
+    hunk.splitLineCount = hunkSplitLineCount;
+    hunk.unifiedLineCount = hunkUnifiedLineCount;
+    splitLineCount += collapsedBefore + hunkSplitLineCount;
+    unifiedLineCount += collapsedBefore + hunkUnifiedLineCount;
+    additionEnd = hunk.additionStart + hunk.additionCount - 1;
+  }
+  const trailingContext = Math.max((fileDiff.additionLines?.length ?? 0) - additionEnd, 0);
+  return {
+    ...fileDiff,
+    cacheKey: fileDiff.cacheKey == null
+      ? undefined
+      : `${fileDiff.cacheKey}:cmux-full-file:${hunks.map((hunk) => hunk.cmuxHunkId).join(",")}`,
+    hunks,
+    splitLineCount: splitLineCount + trailingContext,
+    unifiedLineCount: unifiedLineCount + trailingContext,
+  };
+}
+
 export function annotateDiffMetadata(fileDiff: any, patchText?: string): void {
   if (fileDiff == null || typeof fileDiff !== "object") {
     return;
