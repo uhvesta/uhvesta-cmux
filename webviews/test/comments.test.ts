@@ -108,13 +108,35 @@ test("commentDisplayName collapses single-line ranges", () => {
 
 test("commentSubmissionText formats the submission text", () => {
   expect(commentSubmissionText(comment(), fileDiff)).toBe(
-    "## Review feedback\n\n" +
-      "**File:** `src/example.ts`\n" +
+    "**File:** `src/example.ts`\n" +
       "**Location:** new lines 10-11\n\n" +
-      "**Selected source**\n\n" +
+      "**Selected code**\n\n" +
       "```text\n10: const a = 1;\n11: const b = 2;\n```\n\n" +
       "**Review comment**\n\n> rename this\n",
   );
+});
+
+test("commentSubmissionText includes only the highlighted code when parsed diff context is available", () => {
+  const withContent = {
+    ...fileDiff,
+    hunks: [{
+      ...fileDiff.hunks[0],
+      hunkContent: [
+        { type: "context", lines: 2, additionLineIndex: 0, deletionLineIndex: 0 },
+        { type: "change", additions: 3, additionLineIndex: 0, deletions: 2, deletionLineIndex: 0 },
+      ],
+    }, fileDiff.hunks[1]],
+  };
+  const submission = commentSubmissionText(
+    comment({ startLine: 11, endLine: 12, lineText: "const c = 3;" }),
+    withContent,
+  );
+
+  expect(submission).toContain("11: const b = 2;\n12: const c = 3;");
+  expect(submission).not.toContain("10: const a = 1;");
+  expect(submission).not.toContain("let a = 1;");
+  expect(submission).not.toContain("## Review feedback");
+  expect(submission).not.toContain("**Diff context**");
 });
 
 test("commentSubmissionText marks deletion-side comments as old version", () => {

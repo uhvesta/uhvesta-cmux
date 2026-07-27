@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { JSDOM } from "jsdom";
 import { renderToStaticMarkup } from "react-dom/server";
-import { annotateDiffMetadata, annotateHunks, decorateRenderedHunkGutters, DiffHeaderMetadata, resolveDiffHeaderMetadata, scopedHunkID, toggleExpandedHunkID } from "../src/diff-metadata";
+import { annotateDiffMetadata, annotateHunks, decorateRenderedHunkGutters, DiffHeaderMetadata, fullFileHunkIsExpanded, resolveDiffHeaderMetadata, scopedHunkID, toggleExpandedHunkID } from "../src/diff-metadata";
 import { createDiffViewerLabelResolver } from "../src/labels";
 
 test("binary and mode-only diffs render explicit localized header metadata", () => {
@@ -74,17 +74,29 @@ test("Full File exposes stable per-hunk expansion controls", () => {
       fileDiff={fileDiff}
       label={label}
       fullFile
-      expandedHunkIDs={new Set([(fileDiff.hunks[0] as any).cmuxHunkId])}
+      hunkScope="repo:src/example.ts"
+      collapsedHunkIDs={new Set([
+        scopedHunkID("repo:src/example.ts", (fileDiff.hunks[0] as any).cmuxHunkId),
+      ])}
     />,
   );
   const dom = new JSDOM(`<div id="root">${html}</div>`);
   const controls = dom.window.document.querySelectorAll("[data-cmux-full-file-hunk]");
   expect(controls).toHaveLength(2);
-  expect(controls[0]?.getAttribute("aria-pressed")).toBe("true");
-  expect(controls[1]?.getAttribute("aria-pressed")).toBe("false");
-  expect(controls[0]?.getAttribute("title")).toBe("Collapse unchanged context");
-  expect(controls[1]?.getAttribute("title")).toBe("Expand unchanged context");
+  expect(controls[0]?.getAttribute("aria-pressed")).toBe("false");
+  expect(controls[1]?.getAttribute("aria-pressed")).toBe("true");
+  expect(controls[0]?.getAttribute("title")).toBe("Expand unchanged context");
+  expect(controls[1]?.getAttribute("title")).toBe("Collapse unchanged context");
   dom.window.close();
+});
+
+test("Full File expands every hunk by default", () => {
+  expect(fullFileHunkIsExpanded(new Set(), "repo:src/example.ts", "semantic-hunk-a")).toBe(true);
+  expect(fullFileHunkIsExpanded(
+    new Set([scopedHunkID("repo:src/example.ts", "semantic-hunk-a")]),
+    "repo:src/example.ts",
+    "semantic-hunk-a",
+  )).toBe(false);
 });
 
 test("Full File hunk controls toggle a stable ID without changing other hunks", () => {
