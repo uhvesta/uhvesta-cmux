@@ -46,6 +46,48 @@ test("review prompt excludes feedback that was already delivered", () => {
   expect(prompt).not.toContain("Already delivered");
 });
 
+test("review prompt reduces legacy whole-hunk submissions to the selected lines", () => {
+  const prompt = reviewPrompt([
+    comment({
+      filePath: "vendor/difit/src/server/server.ts",
+      startLine: 124,
+      endLine: 129,
+      lineText: "}",
+      message: "dislike this",
+      submissionText: [
+        "## Review feedback",
+        "",
+        "**File:** `vendor/difit/src/server/server.ts`",
+        "**Location:** new lines 124-129",
+        "",
+        "**Diff context**",
+        "",
+        "```diff",
+        "@@ -123,1 +123,7 @@",
+        " unchanged",
+        "+export interface DiffApp {",
+        "+  app: Express;",
+        "+  fileWatcher: FileWatcherService;",
+        "+  invalidateCache: () => void;",
+        "+  outputFinalComments: () => void;",
+        "+}",
+        "```",
+        "",
+        "**Review comment**",
+        "",
+        "> dislike this",
+      ].join("\n"),
+    }),
+  ]);
+
+  expect(prompt).toContain("**Selected code**");
+  expect(prompt).toContain("export interface DiffApp {");
+  expect(prompt).toContain("  outputFinalComments: () => void;");
+  expect(prompt).not.toContain("**Diff context**");
+  expect(prompt).not.toContain("@@ -123,1 +123,7 @@");
+  expect(prompt).not.toContain(" unchanged");
+});
+
 test("aggregate review prompt keeps repositories with duplicate labels separate", () => {
   const prompt = reviewPrompt([
     comment({ id: "left", repositoryLabel: "app", repositoryRoot: "/work/left/app", message: "Left feedback" }),
