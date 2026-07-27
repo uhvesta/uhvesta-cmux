@@ -113,6 +113,119 @@ struct DiffComment: Codable, Equatable, Identifiable {
     }
 }
 
+extension DiffComment {
+    /// Rewrites saved comments from the old whole-hunk prompt format into the
+    /// current selected-lines format. New comments pass through unchanged.
+    var focusedSubmissionText: String {
+        guard let submissionText else { return "" }
+        guard submissionText.contains("## Review feedback"),
+              submissionText.contains("**Diff context**"),
+              let selectedCode = selectedCodeFromLegacyDiff(submissionText),
+              !selectedCode.isEmpty else {
+            return submissionText
+        }
+        let lineReference = endLine > startLine
+            ? "lines \(startLine)-\(endLine)"
+            : "line \(startLine)"
+        let version = side == "deletions" ? "old" : "new"
+        return """
+        **File:** \(Self.inlineCode(filePath))
+        **Location:** \(version) \(lineReference)
+
+        **Selected code**
+
+        ```text
+        \(selectedCode)
+        ```
+
+        **Review comment**
+
+        \(Self.quote(message))
+
+        """
+    }
+
+    private func selectedCodeFromLegacyDiff(_ text: String) -> String? {
+        guard let fenceStart = text.range(of: "```diff\n"),
+              let fenceEnd = text.range(
+                of: "\n```",
+                range: fenceStart.upperBound..<text.endIndex
+              ) else {
+            return nil
+        }
+        let diffLines = text[fenceStart.upperBound..<fenceEnd.lowerBound]
+            .split(separator: "\n", omittingEmptySubsequences: false)
+        var oldLine = 0
+        var newLine = 0
+        var selected: [String] = []
+        for rawLine in diffLines {
+            let line = String(rawLine)
+            if line.hasPrefix("@@"),
+               let coordinates = Self.hunkCoordinates(line) {
+                oldLine = coordinates.old
+                newLine = coordinates.new
+                continue
+            }
+            guard let prefix = line.first else { continue }
+            let content = String(line.dropFirst())
+            switch prefix {
+            case " ":
+                let target = side == "deletions" ? oldLine : newLine
+                if (startLine...endLine).contains(target) { selected.append(content) }
+                oldLine += 1
+                newLine += 1
+            case "-":
+                if side == "deletions", (startLine...endLine).contains(oldLine) {
+                    selected.append(content)
+                }
+                oldLine += 1
+            case "+":
+                if side != "deletions", (startLine...endLine).contains(newLine) {
+                    selected.append(content)
+                }
+                newLine += 1
+            default:
+                continue
+            }
+        }
+        return selected.isEmpty ? nil : selected.joined(separator: "\n")
+    }
+
+    private static func hunkCoordinates(_ header: String) -> (old: Int, new: Int)? {
+        let pattern = #"^@@ -([0-9]+)(?:,[0-9]+)? \+([0-9]+)(?:,[0-9]+)? @@"#
+        guard let expression = try? NSRegularExpression(pattern: pattern),
+              let match = expression.firstMatch(
+                in: header,
+                range: NSRange(header.startIndex..<header.endIndex, in: header)
+              ),
+              let oldRange = Range(match.range(at: 1), in: header),
+              let newRange = Range(match.range(at: 2), in: header),
+              let old = Int(header[oldRange]),
+              let new = Int(header[newRange]) else {
+            return nil
+        }
+        return (old, new)
+    }
+
+    private static func inlineCode(_ value: String) -> String {
+        let expression = try? NSRegularExpression(pattern: "`+")
+        let range = NSRange(value.startIndex..<value.endIndex, in: value)
+        let longest = expression?.matches(in: value, range: range)
+            .map(\.range.length)
+            .max() ?? 0
+        let fence = String(repeating: "`", count: max(1, longest + 1))
+        return "\(fence)\(value)\(fence)"
+    }
+
+    private static func quote(_ value: String) -> String {
+        value.replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
+            .split(separator: "\n", omittingEmptySubsequences: false)
+            .map { $0.isEmpty ? ">" : "> \($0)" }
+            .joined(separator: "\n")
+    }
+}
+
 /// Persists diff viewer review comments in SQLite under
 /// `Application Support/cmux/diff-comments/comments.sqlite3`.
 ///

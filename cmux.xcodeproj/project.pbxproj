@@ -755,6 +755,7 @@ C0DE71B10000000000000001 /* AppDelegate+AgentChatNotifications.swift in Sources 
 		DE000A020000000000000001 /* DevWindowDisplayDebugWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE000A020000000000000002 /* DevWindowDisplayDebugWindow.swift */; };
 		DE000A010000000000000001 /* DevWindowDisplayDefault.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE000A010000000000000002 /* DevWindowDisplayDefault.swift */; };
 		D1FFC0DE0000000000001002 /* DiffBaseRefSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1FFC0DE0000000000001001 /* DiffBaseRefSettings.swift */; };
+		D1FFC0DE0000000000001003 /* DiffBaseRefSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1FFC0DE0000000000001001 /* DiffBaseRefSettings.swift */; };
 		D1FFC0DE000000000000B002 /* DiffCommentsBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1FFC0DE000000000000B001 /* DiffCommentsBridge.swift */; };
 		D1FFC0DE000000000000A002 /* DiffCommentStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1FFC0DE000000000000A001 /* DiffCommentStore.swift */; };
 		D1FFC0DE000000000000C002 /* DiffCommentStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1FFC0DE000000000000C001 /* DiffCommentStoreTests.swift */; };
@@ -8340,7 +8341,7 @@ C0DE71B10000000000000002 /* AppDelegate+AgentChatNotifications.swift */ = {isa =
 				D1FF52000000000000000001 /* CMUXCLI+TypedDiffViewer.swift in Sources */,
 				06CC2F6C1340C7424D1C7E0A /* CMUXCLI+WorkspaceTodo.swift in Sources */,
 				C0DECAFE0000000000000001 /* CodexTeamsApprovalBridge.swift in Sources */,
-				D1FFC0DE0000000000001002 /* DiffBaseRefSettings.swift in Sources */,
+				D1FFC0DE0000000000001003 /* DiffBaseRefSettings.swift in Sources */,
 				FEEDC1A50000000000000001 /* FeedEventClassifier.swift in Sources */,
 				A5FB1308 /* JSONCObjectEditor+Remove.swift in Sources */,
 				A5FB1312 /* JSONCObjectEditor+Set.swift in Sources */,

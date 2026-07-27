@@ -14,6 +14,22 @@ extension AppDelegate {
         succeeded: Bool,
         body: String
     ) {
+        Self.postReviewQuestionNotification(
+            workspace: workspace,
+            panelId: panelId,
+            requestID: requestID,
+            succeeded: succeeded,
+            body: body
+        )
+    }
+
+    static func postReviewQuestionNotification(
+        workspace: Workspace,
+        panelId: UUID,
+        requestID: String,
+        succeeded: Bool,
+        body: String
+    ) {
         TerminalNotificationStore.shared.addNotification(
             tabId: workspace.id,
             surfaceId: panelId,

@@ -57,10 +57,88 @@ export function reviewPrompt(comments: readonly DiffCommentRecord[]): string {
       "",
       `### Feedback ${index + 1}`,
       "",
-      comment.submissionText?.trim() || fallbackFeedback(comment),
+      focusedSubmissionText(comment).trim(),
     );
   }
   return `${sections.join("\n")}\n`;
+}
+
+/** Context for a one-turn `/ask`: only the selected location/code, never sibling feedback. */
+export function reviewQuestionContext(comment: DiffCommentRecord): string {
+  const focused = focusedSubmissionText(comment);
+  const reviewComment = focused.indexOf("\n**Review comment**");
+  if (reviewComment >= 0) return `${focused.slice(0, reviewComment).trim()}\n`;
+  return focused;
+}
+
+/** Mirrors the native SQLite consumed state immediately after explicit terminal delivery. */
+export function commentsAfterReviewPromptSent(
+  comments: readonly DiffCommentRecord[],
+  sentIDs: readonly string[],
+  consumedAt: string,
+): DiffCommentRecord[] {
+  const sent = new Set(sentIDs);
+  return comments.map((comment) => sent.has(comment.id) ? { ...comment, consumedAt } : comment);
+}
+
+function focusedSubmissionText(comment: DiffCommentRecord): string {
+  const submission = comment.submissionText?.trim();
+  if (!submission || !submission.includes("## Review feedback") || !submission.includes("**Diff context**")) {
+    return submission ? `${submission}\n` : `${fallbackFeedback(comment)}\n`;
+  }
+  const selectedCode = selectedCodeFromLegacyDiff(comment, submission);
+  if (!selectedCode) return `${fallbackFeedback(comment)}\n`;
+  const location = comment.startLine === comment.endLine
+    ? `line ${comment.startLine}`
+    : `lines ${comment.startLine}-${comment.endLine}`;
+  return [
+    `**File:** ${inlineCode(comment.filePath)}`,
+    `**Location:** ${comment.side === "deletions" ? "old" : "new"} ${location}`,
+    "",
+    "**Selected code**",
+    "",
+    `\`\`\`text\n${selectedCode}\n\`\`\``,
+    "",
+    "**Review comment**",
+    "",
+    quote(comment.message),
+    "",
+  ].join("\n");
+}
+
+function selectedCodeFromLegacyDiff(comment: DiffCommentRecord, submission: string): string | null {
+  const fenced = /```diff\n([\s\S]*?)\n```/.exec(submission)?.[1];
+  if (fenced == null) return null;
+  let oldLine = 0;
+  let newLine = 0;
+  const selected: string[] = [];
+  for (const line of fenced.split("\n")) {
+    const header = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(line);
+    if (header) {
+      oldLine = Number(header[1]);
+      newLine = Number(header[2]);
+      continue;
+    }
+    const prefix = line[0];
+    const content = line.slice(1);
+    if (prefix === " ") {
+      const target = comment.side === "deletions" ? oldLine : newLine;
+      if (target >= comment.startLine && target <= comment.endLine) selected.push(content);
+      oldLine += 1;
+      newLine += 1;
+    } else if (prefix === "-") {
+      if (comment.side === "deletions" && oldLine >= comment.startLine && oldLine <= comment.endLine) {
+        selected.push(content);
+      }
+      oldLine += 1;
+    } else if (prefix === "+") {
+      if (comment.side !== "deletions" && newLine >= comment.startLine && newLine <= comment.endLine) {
+        selected.push(content);
+      }
+      newLine += 1;
+    }
+  }
+  return selected.length > 0 ? selected.join("\n") : null;
 }
 
 function inlineCode(value: string): string {
