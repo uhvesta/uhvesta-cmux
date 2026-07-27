@@ -541,6 +541,10 @@ extension CMUXCLI {
         static func localized() -> DiffViewerLabels {
             DiffViewerLabels(values: [
                 "additions": CMUXDiffViewerLocalization.string("diffViewer.additions", defaultValue: "Additions"),
+                "answerFrom": CMUXDiffViewerLocalization.string("diffViewer.answerFrom", defaultValue: "Answer from {author}"),
+                "askComment": CMUXDiffViewerLocalization.string("diffViewer.askComment", defaultValue: "Ask Copilot"),
+                "askImmutable": CMUXDiffViewerLocalization.string("diffViewer.askImmutable", defaultValue: "Review questions cannot be edited. Delete the question and ask again."),
+                "askUnavailableRemote": CMUXDiffViewerLocalization.string("diffViewer.askUnavailableRemote", defaultValue: "Copilot questions are unavailable for SSH review. Regular comments and review prompts still work."),
                 "addComment": CMUXDiffViewerLocalization.string("diffViewer.addComment", defaultValue: "Add comment"),
                 "bars": CMUXDiffViewerLocalization.string("diffViewer.bars", defaultValue: "Bars"),
                 "binaryFile": CMUXDiffViewerLocalization.string("diffViewer.binaryFile", defaultValue: "Binary file"),

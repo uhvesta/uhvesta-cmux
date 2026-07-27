@@ -20,6 +20,8 @@ export function reviewPrompt(comments: readonly DiffCommentRecord[]): string {
     .filter((comment) => comment.parentId == null && !comment.readOnly && !comment.consumedAt && !isAskComment(comment))
     .slice()
     .sort((left, right) => {
+      const repository = repositoryLabel(left).localeCompare(repositoryLabel(right));
+      if (repository !== 0) return repository;
       const path = left.filePath.localeCompare(right.filePath);
       return path !== 0 ? path : left.startLine - right.startLine;
     });
@@ -64,8 +66,7 @@ function repositoryLabel(comment: DiffCommentRecord): string {
   if (typeof comment.repositoryLabel === "string" && comment.repositoryLabel.trim() !== "") {
     return comment.repositoryLabel;
   }
-  const firstPathSegment = comment.filePath.split("/")[0];
-  return firstPathSegment && firstPathSegment !== comment.filePath ? firstPathSegment : "Current repository";
+  return "Current repository";
 }
 
 function fallbackFeedback(comment: DiffCommentRecord): string {

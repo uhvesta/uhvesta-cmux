@@ -36,7 +36,7 @@ import type {
 } from "./comments/types";
 import { resolveDiffFileLanguage, resolveDiffPreloadLanguages } from "./diff-language";
 import { fileName, type AggregateRepository, type DiffItem, type FileTreeSource, type StreamMetrics, streamPatch } from "./diff-stream";
-import { decorateRenderedHunkGutters, DiffHeaderMetadata } from "./diff-metadata";
+import { decorateRenderedHunkGutters, DiffHeaderMetadata, toggleExpandedHunkID } from "./diff-metadata";
 import { applyPierreFileTreeGitStatus, planPierreFileTreeRefresh, selectPierreFileTreePath } from "./file-tree-refresh";
 import { Icon, type IconName } from "./icons";
 import { createDiffViewerLabelResolver, shouldAssertMissingLabels } from "./labels";
@@ -302,6 +302,7 @@ export function App({ config, initialStatus }: ConfigProps) {
   const [activePatchURL, setActivePatchURL] = useState<string | undefined>(payload.patchURL);
   const [state, dispatch] = useReducer(reducer, initialAppState(config, initialStatus));
   const [expandedFullFileHunks, setExpandedFullFileHunks] = useState<ReadonlySet<string>>(() => new Set());
+  const [fullFileViewerGeneration, setFullFileViewerGeneration] = useState(0);
   const latestState = useSyncedRef(state);
   const codeViewRef = useRef<CodeViewHandle<any> | null>(null);
   const codeViewScrollTopRef = useRef(0);
@@ -323,7 +324,7 @@ export function App({ config, initialStatus }: ConfigProps) {
     return Array.from(new Set(roots));
   }, [activeSessionSource, aggregateRepositories, payloadRepoRoot, resolvedSessionSource]);
   const bridgeAvailable = diffCommentsBridgeAvailable() && commentRepoRoots.length > 0;
-  const commentLabels = resolveCommentLabels(payload);
+  const commentLabels = resolveCommentLabels(label);
   const comments = useDiffComments({
     bridgeAvailable,
     dispatch,
@@ -331,22 +332,22 @@ export function App({ config, initialStatus }: ConfigProps) {
     repoRoots: commentRepoRoots,
   });
   const renderedCodeViewOptions = codeViewOptions(state.options, appearance);
-  useEffect(() => {
-    if (state.options.layout !== "full") return;
-    const ids = reviewHunks(state.items).map((hunk) => hunk.hunkId);
-    if (ids.length === 0) return;
-    setExpandedFullFileHunks((current) => {
-      const next = new Set(current);
-      for (const id of ids) next.add(id);
-      return next.size === current.size ? current : next;
-    });
-  }, [state.items, state.options.layout]);
-  const expandFullFileHunk = useCallback((item: DiffItem, hunkIndex: number, hunkId: string) => {
-    setExpandedFullFileHunks((current) => new Set(current).add(hunkId));
+  const toggleFullFileHunk = useCallback((item: DiffItem, hunkIndex: number, hunkId: string) => {
+    const wasExpanded = expandedFullFileHunks.has(hunkId);
+    setExpandedFullFileHunks((current) => toggleExpandedHunkID(current, hunkId));
+    if (wasExpanded) {
+      // Pierre 1.2 exposes public expansion but no collapse method. Recreate
+      // its rendered instances and replay only the remaining stable IDs in
+      // onPostRender below rather than reaching into its private renderer.
+      appliedFullFileHunksRef.current.clear();
+      setFullFileViewerGeneration((generation) => generation + 1);
+      return;
+    }
+    appliedFullFileHunksRef.current.add(`${item.id}:${hunkId}`);
     const instance = codeViewRef.current?.getInstance()?.getRenderedItems()
       .find((rendered) => rendered.id === item.id && rendered.type === "diff")?.instance as any;
     instance?.expandHunk(hunkIndex, "both", Number.MAX_SAFE_INTEGER);
-  }, []);
+  }, [expandedFullFileHunks]);
   renderedCodeViewOptions.onGutterUtilityClick = comments.onGutterUtilityClick as any;
   renderedCodeViewOptions.onLineClick = ((props: { lineNumber: number; annotationSide: DiffCommentSide }, context: { item: DiffItem }) => {
     navigationCursorRef.current = {
@@ -689,6 +690,7 @@ export function App({ config, initialStatus }: ConfigProps) {
             >
               <WorkerRenderOptionsSync codeViewRef={codeViewRef} highlighterOptions={highlighterOptions} />
               <CodeView
+                key={state.options.layout === "full" ? `full:${fullFileViewerGeneration}` : "diff"}
                 ref={codeViewRef}
                 className="code-view-root"
                 containerRef={viewerContainerRef}
@@ -705,7 +707,7 @@ export function App({ config, initialStatus }: ConfigProps) {
                     repositoryStart={(item as DiffItem).repositoryStart}
                     fullFile={state.options.layout === "full"}
                     expandedHunkIDs={expandedFullFileHunks}
-                    onExpandHunk={(hunkIndex, hunkId) => expandFullFileHunk(item as DiffItem, hunkIndex, hunkId)}
+                    onExpandHunk={(hunkIndex, hunkId) => toggleFullFileHunk(item as DiffItem, hunkIndex, hunkId)}
                   />
                 )}
                 renderAnnotation={(annotation, item) =>
@@ -839,6 +841,9 @@ function useDiffComments({
     if (repoRoot == null) return;
     const input = {
       filePath: commentFilePath(item),
+      // Never infer an aggregate repository from a path: sibling repositories
+      // routinely both contain paths such as src/index.ts.
+      repositoryLabel: item.repositoryLabel,
       side: draft.side,
       startLine: draft.startLine,
       endLine: draft.endLine,

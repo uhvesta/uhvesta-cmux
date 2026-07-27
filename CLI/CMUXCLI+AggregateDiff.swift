@@ -167,8 +167,12 @@ extension CMUXCLI {
         guard !destination.isEmpty, root.hasPrefix("/") else {
             throw CLIError(message: "Remote review roots must be absolute paths")
         }
-        guard !destination.hasPrefix("-") else {
-            throw CLIError(message: "SSH review destinations may not begin with '-'")
+        guard !destination.hasPrefix("-"),
+              !destination.unicodeScalars.contains(where: {
+                  CharacterSet.controlCharacters.contains($0) ||
+                      CharacterSet.whitespacesAndNewlines.contains($0)
+              }) else {
+            throw CLIError(message: "SSH review destinations may not begin with '-' or contain whitespace/control characters")
         }
         let executable = companionExecutable?.trimmingCharacters(in: .whitespacesAndNewlines)
         return DiffRemoteReviewTarget(
@@ -218,7 +222,7 @@ extension CMUXCLI {
         guard let data = result.stdout.data(using: .utf8) else {
             throw CLIError(message: "Remote host returned non-UTF-8 review-companion data. Update cmux on \(target.destination) and retry.")
         }
-        let manifest: DiffReviewAggregateManifest
+        var manifest: DiffReviewAggregateManifest
         do {
             manifest = try JSONDecoder().decode(DiffReviewAggregateManifest.self, from: data)
         } catch {
@@ -228,6 +232,20 @@ extension CMUXCLI {
             throw CLIError(message: "Remote review companion protocol version \(manifest.schemaVersion) is unsupported (this cmux requires \(DiffReviewAggregateManifest.schemaVersion)). Update cmux on \(target.destination) and retry.")
         }
         try validateRemoteReviewManifest(manifest, target: target, source: source)
+        // The companion intentionally keeps its versioned manifest transport-neutral:
+        // `root` values are real paths on the remote host. Before this manifest enters
+        // the local viewer, turn each child repository into its durable remote owner.
+        // This prevents equal paths on different hosts from sharing comments, and lets
+        // the viewer recognize every remote child as an SSH review.
+        manifest.repositories = try manifest.repositories.map { repository in
+            var repository = repository
+            repository.root = try canonicalRemoteCommentRoot(
+                destination: target.destination,
+                repositoryRoot: repository.root,
+                reviewRoot: manifest.root
+            )
+            return repository
+        }
         let patch = manifest.repositories.map(\.patch).filter { !$0.isEmpty }.joined(separator: "\n")
         return DiffInput(
             patch: patch,
@@ -325,10 +343,13 @@ extension CMUXCLI {
         }
 
         var repositoryIDs = Set<String>()
+        let expectedRootPrefix = expectedRoot.hasSuffix("/") ? expectedRoot : expectedRoot + "/"
         for repository in manifest.repositories {
+            let standardizedRepositoryRoot = URL(fileURLWithPath: repository.root).standardizedFileURL.path
             guard !repository.id.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
                   !repository.label.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
                   repository.root.hasPrefix("/"),
+                  (standardizedRepositoryRoot == expectedRoot || standardizedRepositoryRoot.hasPrefix(expectedRootPrefix)),
                   repositoryIDs.insert(repository.id).inserted else {
                 throw CLIError(message: "Remote review companion returned invalid repository metadata. Update cmux on \(target.destination) and retry.")
             }
@@ -337,6 +358,24 @@ extension CMUXCLI {
                 throw CLIError(message: "Remote review companion omitted the branch base for \(repository.label). Update cmux on \(target.destination) and retry.")
             }
         }
+    }
+
+    /// Returns the opaque, host-qualified repository identity used by local comment storage.
+    private func canonicalRemoteCommentRoot(
+        destination: String,
+        repositoryRoot: String,
+        reviewRoot: String
+    ) throws -> String {
+        guard !repositoryRoot.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) else {
+            throw CLIError(message: "Remote review companion returned an invalid repository path.")
+        }
+        let standardizedRepositoryRoot = URL(fileURLWithPath: repositoryRoot).standardizedFileURL.path
+        let standardizedReviewRoot = URL(fileURLWithPath: reviewRoot).standardizedFileURL.path
+        let reviewRootPrefix = standardizedReviewRoot.hasSuffix("/") ? standardizedReviewRoot : standardizedReviewRoot + "/"
+        guard standardizedRepositoryRoot == standardizedReviewRoot || standardizedRepositoryRoot.hasPrefix(reviewRootPrefix) else {
+            throw CLIError(message: "Remote review companion returned a repository outside the requested review root.")
+        }
+        return "ssh://\(destination)\(standardizedRepositoryRoot)"
     }
 
     /// Converts transport failures into actionable missing/obsolete-companion diagnostics.

@@ -51,8 +51,22 @@ final class DiffCommentsBridge: NSObject, WKScriptMessageHandlerWithReply {
         }
     }
 
+    private struct QuestionTaskKey: Hashable {
+        let workspaceScope: UUID
+        let commentID: UUID
+    }
+
+    private struct ActiveQuestionTask {
+        let runID: UUID
+        let requestID: String
+        let client: ReviewQuestionSidecarClient
+        let task: Task<Void, Never>
+    }
+
     private let store: DiffCommentStore
-    private var questionTasks: [UUID: Task<Void, Never>] = [:]
+    /// Live sidecar observation is scoped exactly like the SQLite comment
+    /// store. Equal comment UUIDs are valid in separate workspace scopes.
+    private var questionTasks: [QuestionTaskKey: ActiveQuestionTask] = [:]
 
     init(store: DiffCommentStore? = nil) {
         // Default resolved in the MainActor body: a `.shared` default argument
@@ -204,10 +218,21 @@ final class DiffCommentsBridge: NSObject, WKScriptMessageHandlerWithReply {
             guard let rawId = params["id"] as? String, let id = UUID(uuidString: rawId) else {
                 throw BridgeError.invalidRequest("Missing comment id")
             }
-            DiffCommentSubmissionPool.shared.removePending(commentId: id)
             let workspace = try? resolveWorkspace(for: webView)
             let scopedStore = workspace.map { store.workspaceStore(for: $0.stableId) } ?? store
-            return ["deleted": scopedStore.delete(id: id, repoRoot: repoRoot)]
+            let existing = scopedStore.comments(repoRoot: repoRoot).first { $0.id == id }
+            let deleted = scopedStore.delete(id: id, repoRoot: repoRoot)
+            if let workspace {
+                DiffCommentSubmissionPool.shared.removePending(commentId: id, workspaceId: workspace.id)
+                if deleted, Self.isReviewQuestion(existing) {
+                    await cancelQuestion(
+                        workspace: workspace,
+                        commentID: id,
+                        requestID: existing?.sidecarRequestID
+                    )
+                }
+            }
+            return ["deleted": deleted]
         case "comments.sendReviewPrompt":
             guard let reviewPrompt = params["reviewPrompt"] as? String,
                   !reviewPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
@@ -299,7 +324,7 @@ final class DiffCommentsBridge: NSObject, WKScriptMessageHandlerWithReply {
         question.requestStatus = "running"
         question.updatedAt = Date()
         let savedQuestion = scopedStore.upsert(question, repoRoot: repoRoot)
-        DiffCommentSubmissionPool.shared.removePending(commentId: savedQuestion.id)
+        DiffCommentSubmissionPool.shared.removePending(commentId: savedQuestion.id, workspaceId: workspace.id)
 
         let app = AppDelegate.shared
         guard let app,
@@ -332,8 +357,10 @@ final class DiffCommentsBridge: NSObject, WKScriptMessageHandlerWithReply {
             persistedQuestion = scopedStore.upsert(persistedQuestion, repoRoot: repoRoot)
             let answer = pendingAnswer(for: persistedQuestion, result: result)
             let savedAnswer = scopedStore.upsert(answer, repoRoot: repoRoot)
-            questionTasks[persistedQuestion.id]?.cancel()
-            questionTasks[persistedQuestion.id] = Task { [weak self, weak app] in
+            let taskKey = questionTaskKey(workspace: workspace, commentID: persistedQuestion.id)
+            questionTasks[taskKey]?.task.cancel()
+            let runID = UUID()
+            let task = Task { [weak self, weak app] in
                 guard let self else { return }
                 await self.observeQuestion(
                     client: client,
@@ -343,9 +370,17 @@ final class DiffCommentsBridge: NSObject, WKScriptMessageHandlerWithReply {
                     repoRoot: repoRoot,
                     workspace: workspace,
                     panelId: panelId,
-                    app: app
+                    app: app,
+                    taskKey: taskKey,
+                    runID: runID
                 )
             }
+            questionTasks[taskKey] = ActiveQuestionTask(
+                runID: runID,
+                requestID: result.id,
+                client: client,
+                task: task
+            )
             return ["question": Self.commentJSON(persistedQuestion), "answer": Self.commentJSON(savedAnswer), "status": result.status]
         } catch {
             let failed = markQuestionFailed(savedQuestion, existingAnswer: nil, repoRoot: repoRoot, store: scopedStore)
@@ -369,15 +404,24 @@ final class DiffCommentsBridge: NSObject, WKScriptMessageHandlerWithReply {
         repoRoot: String,
         workspace: Workspace,
         panelId: UUID?,
-        app: AppDelegate?
+        app: AppDelegate?,
+        taskKey: QuestionTaskKey,
+        runID: UUID
     ) async {
-        defer { questionTasks[question.id] = nil }
+        defer { finishQuestionTask(for: taskKey, runID: runID) }
         let scopedStore = store.workspaceStore(for: workspace.stableId)
         var answer = initialAnswer
         do {
             let initial = try await client.result(id: result.id)
             if initial.status != "running" {
-                let saved = completeQuestion(initial, question: question, answer: answer, repoRoot: repoRoot, store: scopedStore)
+                guard let persistedQuestion = persistedQuestion(
+                    id: question.id,
+                    requestID: result.id,
+                    repoRoot: repoRoot,
+                    store: scopedStore
+                ) else { return }
+                answer = scopedStore.comments(repoRoot: repoRoot).first(where: { $0.parentId == question.id }) ?? answer
+                let saved = completeQuestion(initial, question: persistedQuestion, answer: answer, repoRoot: repoRoot, store: scopedStore)
                 if let panelId {
                     app?.postReviewQuestionNotification(
                         workspace: workspace,
@@ -393,6 +437,12 @@ final class DiffCommentsBridge: NSObject, WKScriptMessageHandlerWithReply {
             for try await event in eventStream {
                 guard !Task.isCancelled else { return }
                 if case .delta(let text) = event, !text.isEmpty {
+                    guard persistedQuestion(
+                        id: question.id,
+                        requestID: result.id,
+                        repoRoot: repoRoot,
+                        store: scopedStore
+                    ) != nil else { return }
                     answer.message += text
                     answer.updatedAt = Date()
                     _ = scopedStore.upsert(answer, repoRoot: repoRoot)
@@ -400,7 +450,14 @@ final class DiffCommentsBridge: NSObject, WKScriptMessageHandlerWithReply {
             }
             guard !Task.isCancelled else { return }
             let final = try await client.result(id: result.id)
-            let saved = completeQuestion(final, question: question, answer: answer, repoRoot: repoRoot, store: scopedStore)
+            guard let persistedQuestion = persistedQuestion(
+                id: question.id,
+                requestID: result.id,
+                repoRoot: repoRoot,
+                store: scopedStore
+            ) else { return }
+            answer = scopedStore.comments(repoRoot: repoRoot).first(where: { $0.parentId == question.id }) ?? answer
+            let saved = completeQuestion(final, question: persistedQuestion, answer: answer, repoRoot: repoRoot, store: scopedStore)
             if let panelId {
                 app?.postReviewQuestionNotification(
                     workspace: workspace,
@@ -412,7 +469,13 @@ final class DiffCommentsBridge: NSObject, WKScriptMessageHandlerWithReply {
             }
         } catch {
             guard !Task.isCancelled else { return }
-            let saved = markQuestionFailed(question, existingAnswer: answer, repoRoot: repoRoot, store: scopedStore).answer
+            guard let persistedQuestion = persistedQuestion(
+                id: question.id,
+                requestID: result.id,
+                repoRoot: repoRoot,
+                store: scopedStore
+            ) else { return }
+            let saved = markQuestionFailed(persistedQuestion, existingAnswer: answer, repoRoot: repoRoot, store: scopedStore).answer
             if let panelId {
                 app?.postReviewQuestionNotification(
                     workspace: workspace,
@@ -519,6 +582,48 @@ final class DiffCommentsBridge: NSObject, WKScriptMessageHandlerWithReply {
         return (persistedQuestion, store.upsert(answer, repoRoot: repoRoot))
     }
 
+    private func questionTaskKey(workspace: Workspace, commentID: UUID) -> QuestionTaskKey {
+        QuestionTaskKey(workspaceScope: workspace.stableId, commentID: commentID)
+    }
+
+    private func finishQuestionTask(for key: QuestionTaskKey, runID: UUID) {
+        guard questionTasks[key]?.runID == runID else { return }
+        questionTasks[key] = nil
+    }
+
+    /// Deletes the live sidecar resource after the durable parent was removed.
+    /// The parent-existence guards in `observeQuestion` make a late sidecar
+    /// terminal event harmless even if DELETE races its completion.
+    private func cancelQuestion(workspace: Workspace, commentID: UUID, requestID: String?) async {
+        let key = questionTaskKey(workspace: workspace, commentID: commentID)
+        let active = questionTasks.removeValue(forKey: key)
+        active?.task.cancel()
+        let sidecarRequestID = active?.requestID ?? requestID
+        guard let sidecarRequestID, !sidecarRequestID.isEmpty else { return }
+        let client: ReviewQuestionSidecarClient?
+        if let active {
+            client = active.client
+        } else {
+            client = await AppDelegate.shared?.reviewQuestionSidecarClient(for: workspace)
+        }
+        guard let client else { return }
+        try? await client.cancel(id: sidecarRequestID)
+    }
+
+    /// Returns the current durable parent only when it still belongs to this
+    /// sidecar request. A deleted or superseded question must never be
+    /// resurrected by a late event, completion, or notification.
+    private func persistedQuestion(
+        id: UUID,
+        requestID: String,
+        repoRoot: String,
+        store: DiffCommentStore
+    ) -> DiffComment? {
+        store.comments(repoRoot: repoRoot).first { comment in
+            comment.id == id && Self.isReviewQuestion(comment) && comment.sidecarRequestID == requestID
+        }
+    }
+
     /// Restores persisted, unfinished `/ask` work after a page or app restart.
     /// A missing request/session identity cannot be reattached, so it is marked
     /// failed instead of leaving an indeterminate permanent spinner.
@@ -540,7 +645,8 @@ final class DiffCommentsBridge: NSObject, WKScriptMessageHandlerWithReply {
             return
         }
         for question in questions {
-            guard questionTasks[question.id] == nil else { continue }
+            let taskKey = questionTaskKey(workspace: workspace, commentID: question.id)
+            guard questionTasks[taskKey] == nil else { continue }
             guard let requestID = question.sidecarRequestID, !requestID.isEmpty,
                   let sessionID = question.sidecarSessionID, !sessionID.isEmpty else {
                 _ = markQuestionFailed(question, existingAnswer: comments.first { $0.parentId == question.id }, repoRoot: repoRoot, store: scopedStore)
@@ -551,7 +657,14 @@ final class DiffCommentsBridge: NSObject, WKScriptMessageHandlerWithReply {
                 let existingAnswer = comments.first { $0.parentId == question.id }
                     ?? pendingAnswer(for: question, result: result)
                 if result.status != "running" {
-                    let saved = completeQuestion(result, question: question, answer: existingAnswer, repoRoot: repoRoot, store: scopedStore)
+                    guard let currentQuestion = persistedQuestion(
+                        id: question.id,
+                        requestID: requestID,
+                        repoRoot: repoRoot,
+                        store: scopedStore
+                    ) else { continue }
+                    let currentAnswer = scopedStore.comments(repoRoot: repoRoot).first(where: { $0.parentId == question.id }) ?? existingAnswer
+                    let saved = completeQuestion(result, question: currentQuestion, answer: currentAnswer, repoRoot: repoRoot, store: scopedStore)
                     if let panelId {
                         app.postReviewQuestionNotification(workspace: workspace, panelId: panelId, requestID: requestID, succeeded: result.status == "completed", body: saved.message)
                     }
@@ -573,10 +686,28 @@ final class DiffCommentsBridge: NSObject, WKScriptMessageHandlerWithReply {
                 persistedQuestion.updatedAt = Date()
                 persistedQuestion = scopedStore.upsert(persistedQuestion, repoRoot: repoRoot)
                 let persistedAnswer = scopedStore.upsert(existingAnswer, repoRoot: repoRoot)
-                questionTasks[persistedQuestion.id] = Task { [weak self, weak app] in
+                let runID = UUID()
+                let task = Task { [weak self, weak app] in
                     guard let self else { return }
-                    await self.observeQuestion(client: client, result: restoredResult, question: persistedQuestion, answer: persistedAnswer, repoRoot: repoRoot, workspace: workspace, panelId: panelId, app: app)
+                    await self.observeQuestion(
+                        client: client,
+                        result: restoredResult,
+                        question: persistedQuestion,
+                        answer: persistedAnswer,
+                        repoRoot: repoRoot,
+                        workspace: workspace,
+                        panelId: panelId,
+                        app: app,
+                        taskKey: taskKey,
+                        runID: runID
+                    )
                 }
+                questionTasks[taskKey] = ActiveQuestionTask(
+                    runID: runID,
+                    requestID: restoredResult.id,
+                    client: client,
+                    task: task
+                )
             } catch {
                 _ = markQuestionFailed(question, existingAnswer: comments.first { $0.parentId == question.id }, repoRoot: repoRoot, store: scopedStore)
             }
