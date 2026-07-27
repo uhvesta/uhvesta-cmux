@@ -12,6 +12,7 @@ import {
 
 test("review question contract preserves review context and only completes one read-only turn", () => {
   const request = normalizeReviewQuestionRequest({
+    requestId: "question-1",
     repoRoot: "/repo/cmux",
     question: "Why was this branch added?",
     reviewPrompt: "## Sources/Foo.swift\n\n> + let branch = true",
@@ -64,6 +65,7 @@ test("review-only Copilot launch globally denies writes and shell tools", async 
 
 test("review-only handoff completes as failed when ACP reports an error", () => {
   const request = normalizeReviewQuestionRequest({
+    requestId: "review-1",
     repoRoot: "/repo/cmux",
     reviewPrompt: "# Review prompt\nPlease summarize the changed hunk.",
   });
@@ -76,6 +78,7 @@ test("review-only handoff completes as failed when ACP reports an error", () => 
 });
 
 test("review question rejects an empty repository root or review context", () => {
-  expect(() => normalizeReviewQuestionRequest({ repoRoot: "", reviewPrompt: "context" })).toThrow("repoRoot");
-  expect(() => normalizeReviewQuestionRequest({ repoRoot: "/repo", reviewPrompt: "" })).toThrow("reviewPrompt");
+  expect(() => normalizeReviewQuestionRequest({ requestId: "request-1", repoRoot: "", reviewPrompt: "context" })).toThrow("repoRoot");
+  expect(() => normalizeReviewQuestionRequest({ requestId: "request-1", repoRoot: "/repo", reviewPrompt: "" })).toThrow("reviewPrompt");
+  expect(() => normalizeReviewQuestionRequest({ repoRoot: "/repo", reviewPrompt: "context" })).toThrow("requestId");
 });

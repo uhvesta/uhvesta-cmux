@@ -42,12 +42,27 @@ test("POST through ACP done becomes a completed review question", async () => {
     const created = await fetch(`http://127.0.0.1:${port}/api/review-questions`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ repoRoot: repo, question: "What changed?", reviewPrompt: "# Review\nNo tools." }),
+      body: JSON.stringify({ requestId: "review-deferred", repoRoot: repo, question: "What changed?", reviewPrompt: "# Review\nNo tools." }),
     });
     if (created.status !== 202) throw new Error(`POST failed: ${created.status} ${await created.text()}`);
     const initial = await created.json() as { id?: string; status?: string };
     if (!initial.id || initial.status !== "running") {
       throw new Error(`unexpected POST response: ${JSON.stringify(initial)}`);
+    }
+    if (initial.id !== "review-deferred") {
+      throw new Error(`sidecar did not retain the caller request ID: ${JSON.stringify(initial)}`);
+    }
+    // This models native persisting its durable request ID before a POST whose
+    // response is lost during sidecar replacement. Retrying must join the
+    // accepted turn rather than create a second Copilot session.
+    const retried = await fetch(`http://127.0.0.1:${port}/api/review-questions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ requestId: "review-deferred", repoRoot: repo, question: "What changed?", reviewPrompt: "# Review\nNo tools." }),
+    });
+    const retriedResult = await retried.json() as { id?: string; status?: string };
+    if (retried.status !== 202 || retriedResult.id !== initial.id || retriedResult.status !== "running") {
+      throw new Error(`idempotent retry did not reattach to the accepted request: ${JSON.stringify(retriedResult)}`);
     }
 
     const deadline = Date.now() + 20_000;
@@ -116,7 +131,7 @@ test("an accepted running review question survives sidecar process restart", asy
     const created = await fetch(`http://127.0.0.1:${firstPort}/api/review-questions`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ repoRoot: repo, question: "What changed?", reviewPrompt: "# Review\nNo tools." }),
+      body: JSON.stringify({ requestId: "review-restart", repoRoot: repo, question: "What changed?", reviewPrompt: "# Review\nNo tools." }),
     });
     if (created.status !== 202) throw new Error(`POST failed: ${created.status} ${await created.text()}`);
     const initial = await created.json() as { id?: string; status?: string };
@@ -178,7 +193,7 @@ test("DELETE cancels a running review question and removes its durable checkpoin
     }
     const created = await fetch(`http://127.0.0.1:${port}/api/review-questions`, {
       method: "POST", headers: { "content-type": "application/json" },
-      body: JSON.stringify({ repoRoot: repo, question: "What changed?", reviewPrompt: "# Review\nNo tools." }),
+      body: JSON.stringify({ requestId: "review-delete", repoRoot: repo, question: "What changed?", reviewPrompt: "# Review\nNo tools." }),
     });
     const initial = await created.json() as { id: string };
     const deleted = await fetch(`http://127.0.0.1:${port}/api/review-questions/${initial.id}`, { method: "DELETE" });

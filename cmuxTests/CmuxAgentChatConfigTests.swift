@@ -11,6 +11,43 @@ import Testing
 @Suite(.serialized)
 struct CmuxAgentChatConfigTests {
 
+    private actor LaunchProbe {
+        private var launchCount = 0
+        private var isReleased = false
+        private var startedWaiter: CheckedContinuation<Void, Never>?
+        private var releaseWaiter: CheckedContinuation<Void, Never>?
+
+        func markStarted() {
+            launchCount += 1
+            startedWaiter?.resume()
+            startedWaiter = nil
+        }
+
+        func waitUntilStarted() async {
+            guard launchCount == 0 else { return }
+            await withCheckedContinuation { continuation in
+                startedWaiter = continuation
+            }
+        }
+
+        func waitForRelease() async {
+            guard !isReleased else { return }
+            await withCheckedContinuation { continuation in
+                releaseWaiter = continuation
+            }
+        }
+
+        func release() {
+            isReleased = true
+            releaseWaiter?.resume()
+            releaseWaiter = nil
+        }
+
+        func count() -> Int {
+            launchCount
+        }
+    }
+
     @MainActor
     private func withAgentChatUIFlag<T>(_ enabled: Bool, _ body: () throws -> T) throws -> T {
         let flags = CmuxFeatureFlags.shared
@@ -275,6 +312,21 @@ struct CmuxAgentChatConfigTests {
         #expect(store.stateFileURL(launchId: "launch-b").lastPathComponent == "state-launch-b.json")
     }
 
+    @Test func reviewQuestionRequestEncodesCallerDurableCorrelationID() throws {
+        let request = ReviewQuestionSidecarRequest(
+            requestID: "request-42",
+            repoRoot: "/repo/cmux",
+            reviewPrompt: "# Review",
+            question: "What changed?"
+        )
+        let payload = try #require(JSONSerialization.jsonObject(
+            with: JSONEncoder().encode(request)
+        ) as? [String: Any])
+
+        #expect(payload["requestId"] as? String == "request-42")
+        #expect(payload["repoRoot"] as? String == "/repo/cmux")
+    }
+
     @Test func agentChatStateFileStoreSweepsPatternedStaleFiles() async throws {
         let fileManager = FileManager.default
         let root = fileManager.temporaryDirectory.appendingPathComponent(
@@ -319,6 +371,36 @@ struct CmuxAgentChatConfigTests {
         if secondBegin {
             AgentChatActionInFlightGate.end()
         }
+    }
+
+    @Test func ownedSidecarLaunchCoordinatorSharesOneConcurrentLaunch() async {
+        let coordinator = AgentChatOwnedServerLaunchCoordinator()
+        let probe = LaunchProbe()
+        let availability = AgentChatServerAvailability(
+            isReachable: true,
+            browserURL: URL(string: "http://127.0.0.1:43210/token/")
+        )
+
+        async let first = coordinator.joinOrStart {
+            await probe.markStarted()
+            await probe.waitForRelease()
+            return availability
+        }
+        await probe.waitUntilStarted()
+        async let second = coordinator.joinOrStart {
+            await probe.markStarted()
+            await probe.waitForRelease()
+            return availability
+        }
+        await Task.yield()
+        await probe.release()
+
+        let resolved = await (first, second)
+        #expect(resolved.0.isReachable)
+        #expect(resolved.1.isReachable)
+        #expect(resolved.0.browserURL == availability.browserURL)
+        #expect(resolved.1.browserURL == availability.browserURL)
+        #expect(await probe.count() == 1)
     }
 
     @Test func agentChatThemePayloadUsesResolvedGhosttyConfigFields() throws {

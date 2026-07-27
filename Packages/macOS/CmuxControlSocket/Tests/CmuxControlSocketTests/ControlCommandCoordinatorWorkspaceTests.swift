@@ -15,9 +15,15 @@ struct ControlCommandCoordinatorWorkspaceTests {
         ControlRequest(id: .int(1), method: method, params: params)
     }
 
-    private func summary(id: UUID = UUID(), title: String, customTitle: String?) -> ControlWorkspaceSummary {
+    private func summary(
+        id: UUID = UUID(),
+        stableID: UUID = UUID(),
+        title: String,
+        customTitle: String?
+    ) -> ControlWorkspaceSummary {
         ControlWorkspaceSummary(
             id: id,
+            stableID: stableID,
             title: title,
             customTitle: customTitle,
             customDescription: nil,
@@ -73,6 +79,37 @@ struct ControlCommandCoordinatorWorkspaceTests {
         #expect(workspace["title"] == .string("Terminal"))
         #expect(workspace["custom_title"] == .null)
         #expect(workspace["has_custom_title"] == .bool(false))
+    }
+
+    @Test func workspaceListAndCurrentExposeRestartStableIDsWithoutChangingRuntimeIDs() throws {
+        let (coordinator, context) = coordinator()
+        let runtimeID = UUID()
+        let stableID = UUID()
+        let workspace = summary(id: runtimeID, stableID: stableID, title: "Terminal", customTitle: nil)
+        context.listResolution = .resolved(windowID: nil, workspaces: [workspace], selectedIndex: 0)
+        context.currentResolution = .resolved(
+            windowID: nil,
+            workspaceID: runtimeID,
+            index: 0,
+            summary: workspace
+        )
+
+        guard case .ok(.object(let listPayload)) = coordinator.handle(request("workspace.list")),
+              case .array(let listRows) = listPayload["workspaces"],
+              case .object(let listWorkspace) = listRows.first,
+              case .ok(.object(let currentPayload)) = coordinator.handle(request("workspace.current")),
+              case .object(let currentWorkspace) = currentPayload["workspace"] else {
+            Issue.record("unexpected workspace payload shape")
+            return
+        }
+
+        for payload in [listWorkspace, currentWorkspace] {
+            #expect(payload["id"] == .string(runtimeID.uuidString))
+            #expect(payload["stable_id"] == .string(stableID.uuidString))
+            #expect(payload["ref"] == .string("workspace:1"))
+        }
+        #expect(currentPayload["workspace_id"] == .string(runtimeID.uuidString))
+        #expect(currentPayload["workspace_ref"] == .string("workspace:1"))
     }
 
     @Test func workspaceCloseReportsKnownTeardownFailureDistinctly() throws {

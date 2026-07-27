@@ -917,6 +917,31 @@ final class CMUXOpenCommandTests: XCTestCase {
         XCTAssertTrue(result.stderr.contains("invalid repository metadata"), result.stderr)
     }
 
+    func testRemoteReviewRejectsCompanionBranchBaseDifferentFromExplicitRequest() throws {
+        let cliPath = try bundledCLIPath()
+        let fixtureURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cmux-review-unexpected-base-\(UUID().uuidString)", isDirectory: true)
+        let fakeSSHURL = fixtureURL.appendingPathComponent("fake-ssh", isDirectory: false)
+        defer { try? FileManager.default.removeItem(at: fixtureURL) }
+
+        try FileManager.default.createDirectory(at: fixtureURL, withIntermediateDirectories: true)
+        try "#!/bin/sh\\nprintf '%s' '{\"schemaVersion\":1,\"root\":\"/srv/workspace\",\"source\":\"branch\",\"repositories\":[{\"id\":\"repo\",\"root\":\"/srv/workspace/repo\",\"label\":\"repo\",\"baseRef\":\"upstream/main\",\"patch\":\"\"}]}'\\n"
+            .write(to: fakeSSHURL, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: fakeSSHURL.path)
+
+        let result = runDiffCLIExpectingNoOpen(
+            cliPath: cliPath,
+            arguments: ["diff", "--ssh", "review@example.invalid:/srv/workspace", "--branch", "--base", "origin/main"],
+            environmentOverrides: ["CMUX_REVIEW_SSH_EXECUTABLE": fakeSSHURL.path]
+        )
+
+        XCTAssertNotEqual(result.status, 0)
+        XCTAssertTrue(
+            result.stderr.contains("returned branch base 'upstream/main' instead of requested 'origin/main'"),
+            result.stderr
+        )
+    }
+
     func testRemoteReviewCompanionReportsProtocolAndAvailabilityFailuresBeforeOpeningViewer() throws {
         let cliPath = try bundledCLIPath()
         let fixtureURL = FileManager.default.temporaryDirectory

@@ -526,6 +526,120 @@ test("App reports copy failure without replacing the current status screen", asy
   expect(dom.window.document.getElementById("status-text")?.textContent).toBe("Rendered diff");
 });
 
+test("App uses the review-specific label when copying the review prompt fails", async () => {
+  dom = createDom();
+  installDomGlobals(dom, () => {
+    throw new Error("unexpected fetch");
+  });
+  dom.window.document.execCommand = () => false;
+
+  renderApp(
+    <App
+      config={{
+        payload: {
+          labels: { copyFailedReviewPrompt: "Localized review prompt failure" },
+          statusMessage: "Rendered diff",
+          title: "Diff",
+        },
+      }}
+      initialStatus={createDiffViewerStatus("Rendered diff", { loading: false, statusOnly: true })}
+    />,
+  );
+
+  dom.window.document.getElementById("options-button")?.click();
+  await waitFor(() => Boolean(copyReviewPromptButton()));
+  copyReviewPromptButton()?.click();
+
+  await waitFor(() => dom?.window.document.getElementById("copy-feedback")?.textContent === "Localized review prompt failure");
+});
+
+test("Full File hides the global unchanged-context control", async () => {
+  dom = createDom();
+  installDomGlobals(dom, () => {
+    throw new Error("unexpected fetch");
+  });
+
+  renderApp(
+    <App
+      config={{
+        payload: {
+          layout: "full",
+          layoutSource: "explicit",
+          statusMessage: "Rendered diff",
+          title: "Diff",
+        },
+      }}
+      initialStatus={createDiffViewerStatus("Rendered diff", { loading: false, statusOnly: true })}
+    />,
+  );
+
+  dom.window.document.getElementById("options-button")?.click();
+  await waitFor(() => Boolean(dom?.window.document.getElementById("options-menu")));
+  expect(Array.from(dom.window.document.querySelectorAll<HTMLButtonElement>(".menu-item"))
+    .some((button) => button.textContent?.includes("Expand unchanged context"))).toBe(false);
+});
+
+test("App reload resumes a running /ask poll until native reports a terminal snapshot", async () => {
+  dom = createDom();
+  let listRequests = 0;
+  installDomGlobals(dom, () => {
+    throw new Error("unexpected fetch");
+  });
+  (dom.window as any).webkit = {
+    messageHandlers: {
+      cmuxDiffComments: {
+        async postMessage(request: any) {
+          if (request.method !== "comments.list") return { ok: true, value: {} };
+          listRequests += 1;
+          const running = listRequests === 1;
+          return {
+            ok: true,
+            value: {
+              comments: [
+                {
+                  id: "question-1",
+                  filePath: "src/example.ts",
+                  side: "additions",
+                  startLine: 10,
+                  endLine: 10,
+                  lineText: "const value = 1;",
+                  message: "/ask Why is this needed?",
+                  requestStatus: running ? "running" : "completed",
+                  createdAt: "2026-07-27T00:00:00Z",
+                  updatedAt: "2026-07-27T00:00:00Z",
+                },
+                {
+                  id: "answer-1",
+                  parentId: "question-1",
+                  readOnly: true,
+                  filePath: "src/example.ts",
+                  side: "additions",
+                  startLine: 10,
+                  endLine: 10,
+                  lineText: "const value = 1;",
+                  message: running ? "Copilot is preparing an answer…" : "Because it protects the transaction.",
+                  requestStatus: running ? "running" : "completed",
+                  createdAt: "2026-07-27T00:00:00Z",
+                  updatedAt: "2026-07-27T00:00:00Z",
+                },
+              ],
+            },
+          };
+        },
+      },
+    },
+  };
+
+  renderApp(
+    <App
+      config={{ payload: { repoRoot: "/repo", statusMessage: "Rendered diff", title: "Diff" } }}
+      initialStatus={createDiffViewerStatus("Rendered diff", { loading: false, statusOnly: true })}
+    />,
+  );
+
+  await waitFor(() => listRequests === 2);
+});
+
 test("files sidebar width can be changed from the resize separator", async () => {
   dom = createDom();
   installDomGlobals(dom, () => {
@@ -735,6 +849,11 @@ function renderApp(element: React.ReactNode): void {
 function copyGitApplyButton(): HTMLButtonElement | undefined {
   return Array.from(dom?.window.document.querySelectorAll<HTMLButtonElement>(".menu-item") ?? [])
     .find((button) => button.textContent?.includes("Copy git apply command"));
+}
+
+function copyReviewPromptButton(): HTMLButtonElement | undefined {
+  return Array.from(dom?.window.document.querySelectorAll<HTMLButtonElement>(".menu-item") ?? [])
+    .find((button) => button.textContent?.includes("Copy review prompt"));
 }
 
 function contentFilesWidth(): string | undefined {

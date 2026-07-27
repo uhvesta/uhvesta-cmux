@@ -96,6 +96,21 @@ test("copyReviewPrompt uses the same WebKit-safe textarea fallback", async () =>
   expect(copied).toBe(true);
 });
 
+test("copyReviewPrompt reports a review-specific localized failure", async () => {
+  const dom = new JSDOM("<!doctype html><html><body><textarea></textarea></body></html>");
+  const textarea = dom.window.document.querySelector("textarea");
+  expect(textarea).toBeTruthy();
+  (globalThis as any).navigator = {};
+  (globalThis as any).document = dom.window.document;
+  dom.window.document.execCommand = () => false;
+
+  const message = await copyReviewPrompt("# Review feedback\n", createDiffViewerLabelResolver({
+    copyFailedReviewPrompt: "Localized review prompt failure",
+  }), textarea);
+
+  expect(message).toBe("Localized review prompt failure");
+});
+
 test("resolveDiffNavigationURL strips query and fragment for custom scheme rewrites", () => {
   const dom = new JSDOM("<!doctype html><html><body></body></html>", {
     url: "cmux-diff-viewer://local/current",
