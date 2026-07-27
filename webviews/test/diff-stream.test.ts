@@ -96,6 +96,50 @@ test("streamPatch uses localized fallback for unnamed file tree paths", async ()
   expect(treeSources.at(-1)?.preparedInput).toBeUndefined();
 });
 
+test("streamPatch keeps SSH aggregate children host-qualified for comment ownership", async () => {
+  const dom = new JSDOM("<!doctype html><html><body></body></html>");
+  (globalThis as any).document = dom.window.document;
+  (globalThis as any).window = dom.window;
+  (globalThis as any).fetch = () => Promise.resolve({
+    ok: true,
+    text: () => Promise.resolve("patch"),
+  });
+  dom.window.document.hasFocus = () => false;
+
+  const batches: any[][] = [];
+  await streamPatch({
+    aggregateRepositories: [
+      { id: "host-one", label: "host-one", root: "ssh://alice@host-one.example/srv/workspace/repo" },
+      { id: "host-two", label: "host-two", root: "ssh://alice@host-two.example/srv/workspace/repo" },
+    ],
+    getCollapsed: () => false,
+    initialFileTreeRowCount: 2,
+    label: createDiffViewerLabelResolver(undefined),
+    onBatch: (items) => batches.push(items),
+    onComplete: () => {},
+    onMetrics: () => {},
+    onRename: () => {},
+    onTreeSource: () => {},
+    parsePatchFiles: () => [{
+      files: [
+        { name: "host-one/src/shared.ts", type: "modified", hunks: [] },
+        { name: "host-two/src/shared.ts", type: "modified", hunks: [] },
+      ],
+    }],
+    patchURL: "/patch.diff",
+    processFile: (patchText) => ({ name: patchText, type: "modified", hunks: [] }),
+  });
+
+  const items = batches.flat();
+  expect(items.map((item) => item.commentRepoRoot)).toEqual([
+    "ssh://alice@host-one.example/srv/workspace/repo",
+    "ssh://alice@host-two.example/srv/workspace/repo",
+  ]);
+  expect(items.map((item) => item.commentFilePath)).toEqual(["src/shared.ts", "src/shared.ts"]);
+  expect(new Set(items.map((item) => item.commentRepoRoot)).size).toBe(2);
+  dom.window.close();
+});
+
 test("streamPatch stops callbacks after its abort signal fires", async () => {
   const dom = new JSDOM("<!doctype html><html><body></body></html>");
   (globalThis as any).document = dom.window.document;

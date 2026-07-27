@@ -379,14 +379,17 @@ final class DiffCommentSubmissionPoolTests: XCTestCase {
         XCTAssertEqual(pool.pendingCount(workspaceId: workspace), 1)
     }
 
-    func testRemovePendingDropsDeletedComment() {
+    func testRemovePendingDropsDeletedCommentOnlyFromItsWorkspace() {
         let pool = DiffCommentSubmissionPool()
         let workspace = UUID()
+        let otherWorkspace = UUID()
         let id = UUID()
         pool.setPending(entry(id), workspaceId: workspace)
-        pool.removePending(commentId: id)
+        // The SQLite store permits this exact UUID in a second workspace scope.
+        pool.setPending(entry(id), workspaceId: otherWorkspace)
+        pool.removePending(commentId: id, workspaceId: workspace)
         XCTAssertEqual(pool.pendingCount(workspaceId: workspace), 0)
-        XCTAssertEqual(pool.pendingCount(workspaceId: nil), 0)
+        XCTAssertEqual(pool.pendingCount(workspaceId: otherWorkspace), 1)
     }
 
     func testReviewBundleConsumesEverySourceCommentAsOneEntry() throws {

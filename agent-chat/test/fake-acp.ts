@@ -5,6 +5,7 @@ const modelFlag = Bun.argv.findIndex((arg) => arg === "--model");
 const model = modelFlag >= 0 ? Bun.argv[modelFlag + 1] ?? "" : "";
 const log = process.env.FAKE_ACP_MODEL_LOG;
 if (log) await appendFile(log, `${model}\n`);
+const delayMs = Number(process.env.FAKE_ACP_DELAY_MS ?? "0");
 
 const rl = createInterface({ input: process.stdin });
 const send = (msg: unknown) => {
@@ -19,6 +20,7 @@ for await (const line of rl) {
   } else if (msg.method === "session/new") {
     send({ jsonrpc: "2.0", id: msg.id, result: { sessionId: `fake-${model || "default"}` } });
   } else if (msg.method === "session/prompt") {
+    if (delayMs > 0) await Bun.sleep(delayMs);
     send({
       jsonrpc: "2.0",
       method: "session/update",

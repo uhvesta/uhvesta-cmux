@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { JSDOM } from "jsdom";
 import { renderToStaticMarkup } from "react-dom/server";
-import { annotateDiffMetadata, annotateHunks, decorateRenderedHunkGutters, DiffHeaderMetadata, resolveDiffHeaderMetadata } from "../src/diff-metadata";
+import { annotateDiffMetadata, annotateHunks, decorateRenderedHunkGutters, DiffHeaderMetadata, resolveDiffHeaderMetadata, toggleExpandedHunkID } from "../src/diff-metadata";
 import { createDiffViewerLabelResolver } from "../src/labels";
 
 test("binary and mode-only diffs render explicit localized header metadata", () => {
@@ -82,7 +82,19 @@ test("Full File exposes stable per-hunk expansion controls", () => {
   expect(controls).toHaveLength(2);
   expect(controls[0]?.getAttribute("aria-pressed")).toBe("true");
   expect(controls[1]?.getAttribute("aria-pressed")).toBe("false");
+  expect(controls[0]?.getAttribute("title")).toBe("Collapse unchanged context");
+  expect(controls[1]?.getAttribute("title")).toBe("Expand unchanged context");
   dom.window.close();
+});
+
+test("Full File hunk controls toggle a stable ID without changing other hunks", () => {
+  const expanded = new Set(["semantic-hunk-a"]);
+  const collapsed = toggleExpandedHunkID(expanded, "semantic-hunk-a");
+  const reopened = toggleExpandedHunkID(collapsed, "semantic-hunk-a");
+
+  expect(expanded).toEqual(new Set(["semantic-hunk-a"]));
+  expect(collapsed).toEqual(new Set());
+  expect(reopened).toEqual(new Set(["semantic-hunk-a"]));
 });
 
 test("hunk identities survive shifted patch coordinates and an earlier unrelated hunk", () => {

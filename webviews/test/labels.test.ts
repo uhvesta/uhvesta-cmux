@@ -37,6 +37,10 @@ describe("createDiffViewerLabelResolver", () => {
     const label = createDiffViewerLabelResolver({
       copiedReviewPrompt: "Copied",
       copyReviewPrompt: "Copy",
+      answerFrom: "Answer from {author}",
+      askComment: "Ask Copilot",
+      askImmutable: "Immutable",
+      askUnavailableRemote: "Unavailable remotely",
       fullFile: "Full File",
       queuedReviewPrompt: "Queued",
       repository: "Repository",
@@ -48,5 +52,7 @@ describe("createDiffViewerLabelResolver", () => {
     expect(label("fullFile")).toBe("Full File");
     expect(label("repository")).toBe("Repository");
     expect(label("sendReviewPrompt")).toBe("Send");
+    expect(label("answerFrom")).toBe("Answer from {author}");
+    expect(label("askUnavailableRemote")).toBe("Unavailable remotely");
   });
 });
