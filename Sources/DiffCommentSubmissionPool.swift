@@ -14,6 +14,7 @@ final class DiffCommentSubmissionPool: ObservableObject {
     struct Entry: Equatable {
         let commentId: UUID
         let repoRoot: String
+        let repositoryLabel: String?
         let submissionText: String
         /// Every persisted comment this entry consumes after the TextBox submit succeeds.
         /// Ordinary entries contain one target; an explicit review bundle contains
@@ -29,12 +30,14 @@ final class DiffCommentSubmissionPool: ObservableObject {
         init(
             commentId: UUID,
             repoRoot: String,
+            repositoryLabel: String? = nil,
             submissionText: String,
             consumptionTargets: [ConsumptionTarget]? = nil,
             isReviewBundle: Bool = false
         ) {
             self.commentId = commentId
             self.repoRoot = repoRoot
+            self.repositoryLabel = repositoryLabel
             self.submissionText = submissionText
             self.consumptionTargets = consumptionTargets ?? [
                 ConsumptionTarget(commentId: commentId, repoRoot: repoRoot)
@@ -85,7 +88,10 @@ final class DiffCommentSubmissionPool: ObservableObject {
     func consumeAll(workspaceId: UUID) -> [Entry] {
         guard let entries = entriesByWorkspace[workspaceId], !entries.isEmpty else { return [] }
         entriesByWorkspace[workspaceId] = nil
-        return entries
+        if entries.count == 1, entries[0].isReviewBundle {
+            return entries
+        }
+        return [Self.automaticReviewBundle(from: entries)]
     }
 
     /// Puts entries claimed by `consumeAll` back (failed submit rollback).
@@ -119,5 +125,70 @@ final class DiffCommentSubmissionPool: ObservableObject {
                 isReviewBundle: true
             )
         ]
+    }
+
+    /// Formats the ordinary saved-comment pool as the single document required
+    /// by the TextBox delivery contract. The explicit "Send review prompt"
+    /// action uses the same entry shape, but bundling must not depend on that
+    /// optional UI action.
+    private static func automaticReviewBundle(from entries: [Entry]) -> Entry {
+        let sorted = entries.sorted {
+            let leftLabel = normalizedRepositoryLabel($0)
+            let rightLabel = normalizedRepositoryLabel($1)
+            if leftLabel != rightLabel { return leftLabel < rightLabel }
+            if $0.repoRoot != $1.repoRoot { return $0.repoRoot < $1.repoRoot }
+            return $0.commentId.uuidString < $1.commentId.uuidString
+        }
+        var sections = [
+            "# Review feedback",
+            "",
+            "Apply only the requested changes below. Report ambiguous feedback instead of guessing.",
+        ]
+        var activeRepository: String?
+        for (index, entry) in sorted.enumerated() {
+            let repository = normalizedRepositoryLabel(entry)
+            if repository != activeRepository {
+                activeRepository = repository
+                sections.append(contentsOf: ["", "## Repository: \(inlineCode(repository))"])
+            }
+            sections.append(contentsOf: [
+                "",
+                "### Feedback \(index + 1)",
+                "",
+                entry.submissionText.trimmingCharacters(in: .whitespacesAndNewlines),
+            ])
+        }
+        let targets = sorted.flatMap(\.consumptionTargets)
+        return Entry(
+            commentId: UUID(),
+            repoRoot: sorted[0].repoRoot,
+            repositoryLabel: sorted[0].repositoryLabel,
+            submissionText: sections.joined(separator: "\n") + "\n",
+            consumptionTargets: targets,
+            isReviewBundle: true
+        )
+    }
+
+    private static func normalizedRepositoryLabel(_ entry: Entry) -> String {
+        guard let label = entry.repositoryLabel?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !label.isEmpty else {
+            return entry.repoRoot
+        }
+        return label
+    }
+
+    private static func inlineCode(_ value: String) -> String {
+        var longestRun = 0
+        var currentRun = 0
+        for character in value {
+            if character == "`" {
+                currentRun += 1
+                longestRun = max(longestRun, currentRun)
+            } else {
+                currentRun = 0
+            }
+        }
+        let fence = String(repeating: "`", count: max(1, longestRun + 1))
+        return "\(fence)\(value)\(fence)"
     }
 }
