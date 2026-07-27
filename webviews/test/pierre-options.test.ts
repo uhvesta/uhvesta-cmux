@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { codeViewUnsafeCSS, fileTreeUnsafeCSS, shikiThemeFromGhostty, workerHighlighterOptions } from "../src/pierre-options";
+import { codeViewOptions, codeViewUnsafeCSS, fileTreeUnsafeCSS, shikiThemeFromGhostty, workerHighlighterOptions } from "../src/pierre-options";
 
 test("code view CSS keeps Pierre structural surfaces transparent", () => {
   const css = codeViewUnsafeCSS();
@@ -116,4 +116,20 @@ test("worker highlighter options carry preloaded diff languages", () => {
   }, {}, ["text", "markdown", "swift"]);
 
   expect(options.langs).toEqual(["text", "markdown", "swift"]);
+});
+
+test("Full File is a genuine third viewer layout backed by Pierre expansion", () => {
+  const options = codeViewOptions({
+    collapsed: false,
+    diffIndicators: "bars",
+    expandUnchanged: false,
+    layout: "full",
+    lineNumbers: true,
+    showBackgrounds: true,
+    wordDiffs: false,
+    wordWrap: false,
+  }, {});
+
+  expect(options.diffStyle).toBe("unified");
+  expect(options.expandUnchanged).toBe(false);
 });

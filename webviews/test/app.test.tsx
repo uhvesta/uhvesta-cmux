@@ -2,7 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { JSDOM } from "jsdom";
 import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
-import { adjacentItemId, App, visibleItemId } from "../src/App";
+import { adjacentItemId, App, createRenderedRowNavigationState, nextDiffViewerLayout, visibleItemId } from "../src/App";
 import { createDiffViewerStatus } from "../src/status";
 
 type FetchMock = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response> | Response;
@@ -623,6 +623,12 @@ test("adjacent diff file navigation moves in order and stops at the edges", () =
   expect(adjacentItemId("missing", [], 1)).toBe("");
 });
 
+test("layout control cycles through unified, split, and Full File", () => {
+  expect(nextDiffViewerLayout("unified")).toBe("split");
+  expect(nextDiffViewerLayout("split")).toBe("full");
+  expect(nextDiffViewerLayout("full")).toBe("unified");
+});
+
 test("visible diff file follows the scroll position", () => {
   const items = [{ id: "one" }, { id: "two" }, { id: "three" }] as any;
   const tops: Record<string, number> = { one: 0, two: 500, three: 900 };
@@ -662,6 +668,39 @@ test("native viewer navigation remains installed after an unrelated render", asy
   expect(action?.("diffViewerOpenFileSearch")).toBe(true);
   expect(action?.("unknown")).toBe(false);
   await waitFor(() => dom?.window.document.getElementById("file-search-toggle")?.getAttribute("aria-pressed") === "true");
+});
+
+test("comment motion waits for the authoritative row selected after virtualization", () => {
+  dom = createDom();
+  installDomGlobals(dom, () => {
+    throw new Error("unexpected fetch");
+  });
+  const originalMove = CmuxViewerNavigation.moveRenderedRow;
+  const originalPending = CmuxViewerNavigation.hasPendingRenderedRowMove;
+  const selected: Array<{ itemId?: string; lineNumber: number; side: "additions" | "deletions" }> = [];
+  const comments: Array<{ itemId?: string; lineNumber: number; side: "additions" | "deletions" }> = [];
+  const viewer = document.createElement("div");
+  CmuxViewerNavigation.moveRenderedRow = () => ({ pending: true });
+  CmuxViewerNavigation.hasPendingRenderedRowMove = () => true;
+  try {
+    const navigation = createRenderedRowNavigationState(
+      (row) => selected.push(row),
+      () => {
+        comments.push(selected.at(-1)!);
+        return true;
+      },
+    );
+    expect(navigation.move(viewer, 1)).toBe(true);
+    expect(navigation.comment(viewer)).toBe(true);
+    expect(comments).toEqual([]);
+
+    navigation.resolve({ itemId: "newly-rendered-file", lineNumber: 42, side: "additions" });
+
+    expect(comments).toEqual([{ itemId: "newly-rendered-file", lineNumber: 42, side: "additions" }]);
+  } finally {
+    CmuxViewerNavigation.moveRenderedRow = originalMove;
+    CmuxViewerNavigation.hasPendingRenderedRowMove = originalPending;
+  }
 });
 
 function createDom(url = "http://127.0.0.1/diff"): JSDOM {
