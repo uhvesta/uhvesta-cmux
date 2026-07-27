@@ -53,7 +53,7 @@ export function fullFileDiffWithCollapsedHunks(
   collapsedHunkIDs: ReadonlySet<string>,
 ): any {
   const sourceHunks = Array.isArray(fileDiff?.hunks) ? fileDiff.hunks : [];
-  if (fileDiff?.isPartial || sourceHunks.length === 0) return fileDiff;
+  if (sourceHunks.length === 0 || !hasCompleteFileContents(fileDiff, sourceHunks)) return fileDiff;
   const hasCollapsedHunk = sourceHunks.some((hunk: any) => (
     typeof hunk?.cmuxHunkId === "string" &&
     collapsedHunkIDs.has(scopedHunkID(itemId, hunk.cmuxHunkId))
@@ -73,6 +73,23 @@ export function fullFileDiffWithCollapsedHunks(
     hunks.push(...(compactHunks.length > 0 ? compactHunks : [{ ...sourceHunk, hunkContent: [...(sourceHunk.hunkContent ?? [])] }]));
   }
   return layoutCompactHunks(fileDiff, hunks);
+}
+
+function hasCompleteFileContents(fileDiff: any, hunks: any[]): boolean {
+  const covers = (lines: unknown, startKey: string, countKey: string): boolean => {
+    const lineCount = Array.isArray(lines) ? lines.length : 0;
+    if (lineCount === 0) return true;
+    let coveredThrough = 0;
+    for (const hunk of hunks) {
+      const start = Number(hunk?.[startKey]);
+      const count = Number(hunk?.[countKey]);
+      if (!Number.isFinite(start) || !Number.isFinite(count) || start > coveredThrough + 1) return false;
+      coveredThrough = Math.max(coveredThrough, start + Math.max(count, 0) - 1);
+    }
+    return coveredThrough >= lineCount;
+  };
+  return covers(fileDiff?.additionLines, "additionStart", "additionCount")
+    && covers(fileDiff?.deletionLines, "deletionStart", "deletionCount");
 }
 
 function compactHunkContext(sourceHunk: any): any[] {
@@ -124,6 +141,10 @@ function layoutCompactHunks(fileDiff: any, hunks: any[]): any {
   const trailingContext = Math.max((fileDiff.additionLines?.length ?? 0) - additionEnd, 0);
   return {
     ...fileDiff,
+    // The sidecar's unlimited-context patch contains both complete file
+    // versions even though Pierre's patch parser conservatively marks it
+    // partial. Expansion requires this truthful derived value.
+    isPartial: false,
     cacheKey: fileDiff.cacheKey == null
       ? undefined
       : `${fileDiff.cacheKey}:cmux-full-file:${hunks.map((hunk) => hunk.cmuxHunkId).join(",")}`,

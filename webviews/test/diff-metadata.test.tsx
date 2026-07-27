@@ -41,11 +41,8 @@ test("binary and mode-only diffs render explicit localized header metadata", () 
 });
 
 test("stable hunk numbers are attached to Pierre's rendered gutter", () => {
-  const fileDiff = {
+  const fileDiff: any = {
     name: "src/example.ts",
-    // Git patches remain marked partial even when the sidecar requested
-    // effectively unlimited context and therefore supplied the full file.
-    isPartial: true,
     hunks: [
       { additionStart: 10, additionCount: 2, deletionStart: 9, deletionCount: 2 },
       { additionStart: 42, additionCount: 1, deletionStart: 41, deletionCount: 1 },
@@ -118,8 +115,11 @@ test("Full File hunk state is scoped to its aggregate repository item", () => {
 });
 
 test("collapsing a Full File hunk gives Pierre real collapsed context while preserving its semantic identity", () => {
-  const fileDiff = {
+  const fileDiff: any = {
     name: "src/example.ts",
+    // Git patches remain marked partial even when the sidecar requested
+    // effectively unlimited context and therefore supplied the full file.
+    isPartial: true,
     additionLines: Array.from({ length: 40 }, (_, index) => `new ${index + 1}\n`),
     deletionLines: Array.from({ length: 40 }, (_, index) => `old ${index + 1}\n`),
     hunks: [{
