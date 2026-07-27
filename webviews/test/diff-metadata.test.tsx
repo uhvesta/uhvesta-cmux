@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { JSDOM } from "jsdom";
 import { renderToStaticMarkup } from "react-dom/server";
-import { annotateDiffMetadata, annotateHunks, decorateRenderedHunkGutters, DiffHeaderMetadata, resolveDiffHeaderMetadata, toggleExpandedHunkID } from "../src/diff-metadata";
+import { annotateDiffMetadata, annotateHunks, decorateRenderedHunkGutters, DiffHeaderMetadata, resolveDiffHeaderMetadata, scopedHunkID, toggleExpandedHunkID } from "../src/diff-metadata";
 import { createDiffViewerLabelResolver } from "../src/labels";
 
 test("binary and mode-only diffs render explicit localized header metadata", () => {
@@ -95,6 +95,11 @@ test("Full File hunk controls toggle a stable ID without changing other hunks", 
   expect(expanded).toEqual(new Set(["semantic-hunk-a"]));
   expect(collapsed).toEqual(new Set());
   expect(reopened).toEqual(new Set(["semantic-hunk-a"]));
+});
+
+test("Full File hunk state is scoped to its aggregate repository item", () => {
+  expect(scopedHunkID("repo-a:src/example.ts", "semantic-hunk-a"))
+    .not.toBe(scopedHunkID("repo-b:src/example.ts", "semantic-hunk-a"));
 });
 
 test("hunk identities survive shifted patch coordinates and an earlier unrelated hunk", () => {

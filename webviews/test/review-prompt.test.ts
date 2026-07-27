@@ -46,6 +46,17 @@ test("review prompt excludes feedback that was already delivered", () => {
   expect(prompt).not.toContain("Already delivered");
 });
 
+test("aggregate review prompt keeps repositories with duplicate labels separate", () => {
+  const prompt = reviewPrompt([
+    comment({ id: "left", repositoryLabel: "app", repositoryRoot: "/work/left/app", message: "Left feedback" }),
+    comment({ id: "right", repositoryLabel: "app", repositoryRoot: "/work/right/app", message: "Right feedback" }),
+  ]);
+
+  expect(prompt).toContain("## Repository: `app (/work/left/app)`");
+  expect(prompt).toContain("## Repository: `app (/work/right/app)`");
+  expect(prompt.match(/^## Repository:/gm)).toHaveLength(2);
+});
+
 test("SSH roots are identified before attempting a local Copilot sidecar", () => {
   expect(isRemoteReviewRoot("ssh://review-host/opt/src/repo")).toBe(true);
   expect(isRemoteReviewRoot("/Users/example/repo")).toBe(false);
