@@ -323,12 +323,16 @@ final class DiffCommentsBridge: NSObject, WKScriptMessageHandlerWithReply {
         question.consumedAt = nil
         question.requestStatus = "running"
         question.updatedAt = Date()
+        // Persist the caller-owned request ID before contacting the sidecar.
+        // If the sidecar accepts the POST but the connection drops before its
+        // response arrives, a retry can safely reattach to this exact turn.
+        question.sidecarRequestID = question.id.uuidString
+        question.sidecarSessionID = question.id.uuidString
         let savedQuestion = scopedStore.upsert(question, repoRoot: repoRoot)
         DiffCommentSubmissionPool.shared.removePending(commentId: savedQuestion.id, workspaceId: workspace.id)
 
         let app = AppDelegate.shared
-        guard let app,
-              let client = await app.reviewQuestionSidecarClient(for: workspace) else {
+        guard let app else {
             let failed = markQuestionFailed(savedQuestion, existingAnswer: nil, repoRoot: repoRoot, store: scopedStore)
             let savedAnswer = failed.answer
             AppDelegate.shared?.postReviewQuestionNotification(
@@ -342,12 +346,16 @@ final class DiffCommentsBridge: NSObject, WKScriptMessageHandlerWithReply {
         }
 
         do {
-            let result = try await client.start(
-                ReviewQuestionSidecarRequest(
-                    repoRoot: DiffCommentStore.canonicalRepoRoot(repoRoot),
-                    reviewPrompt: reviewPrompt,
-                    question: questionText
-                )
+            let request = ReviewQuestionSidecarRequest(
+                requestID: savedQuestion.sidecarRequestID ?? savedQuestion.id.uuidString,
+                repoRoot: DiffCommentStore.canonicalRepoRoot(repoRoot),
+                reviewPrompt: reviewPrompt,
+                question: questionText
+            )
+            let (client, result) = try await startQuestion(
+                request,
+                app: app,
+                workspace: workspace
             )
             var persistedQuestion = savedQuestion
             persistedQuestion.requestStatus = result.status
@@ -411,86 +419,120 @@ final class DiffCommentsBridge: NSObject, WKScriptMessageHandlerWithReply {
         defer { finishQuestionTask(for: taskKey, runID: runID) }
         let scopedStore = store.workspaceStore(for: workspace.stableId)
         var answer = initialAnswer
-        do {
-            let initial = try await client.result(id: result.id)
-            if initial.status != "running" {
+        var activeClient = client
+        var activeResult = result
+        var appendStreamedDeltas = true
+        var reattachmentAttempts = 0
+        while !Task.isCancelled {
+            do {
+                let initial = try await activeClient.result(id: activeResult.id)
+                if initial.status != "running" {
+                    guard let persistedQuestion = persistedQuestion(
+                        id: question.id,
+                        requestID: activeResult.id,
+                        repoRoot: repoRoot,
+                        store: scopedStore
+                    ) else { return }
+                    answer = scopedStore.comments(repoRoot: repoRoot).first(where: { $0.parentId == question.id }) ?? answer
+                    let saved = completeQuestion(initial, question: persistedQuestion, answer: answer, repoRoot: repoRoot, store: scopedStore)
+                    if let panelId {
+                        app?.postReviewQuestionNotification(
+                            workspace: workspace,
+                            panelId: panelId,
+                            requestID: activeResult.id,
+                            succeeded: initial.status == "completed",
+                            body: saved.message
+                        )
+                    }
+                    return
+                }
+                let eventStream = await activeClient.events(for: activeResult.sessionId)
+                for try await event in eventStream {
+                    guard !Task.isCancelled else { return }
+                    if appendStreamedDeltas, case .delta(let text) = event, !text.isEmpty {
+                        guard persistedQuestion(
+                            id: question.id,
+                            requestID: activeResult.id,
+                            repoRoot: repoRoot,
+                            store: scopedStore
+                        ) != nil else { return }
+                        answer.message += text
+                        answer.updatedAt = Date()
+                        _ = scopedStore.upsert(answer, repoRoot: repoRoot)
+                    }
+                }
+                guard !Task.isCancelled else { return }
+                let final = try await activeClient.result(id: activeResult.id)
                 guard let persistedQuestion = persistedQuestion(
                     id: question.id,
-                    requestID: result.id,
+                    requestID: activeResult.id,
                     repoRoot: repoRoot,
                     store: scopedStore
                 ) else { return }
                 answer = scopedStore.comments(repoRoot: repoRoot).first(where: { $0.parentId == question.id }) ?? answer
-                let saved = completeQuestion(initial, question: persistedQuestion, answer: answer, repoRoot: repoRoot, store: scopedStore)
+                let saved = completeQuestion(final, question: persistedQuestion, answer: answer, repoRoot: repoRoot, store: scopedStore)
                 if let panelId {
                     app?.postReviewQuestionNotification(
                         workspace: workspace,
                         panelId: panelId,
-                        requestID: result.id,
-                        succeeded: initial.status == "completed",
+                        requestID: activeResult.id,
+                        succeeded: final.status == "completed",
                         body: saved.message
                     )
                 }
-                return
-            }
-            let eventStream = await client.events(for: result.sessionId)
-            for try await event in eventStream {
+            } catch {
                 guard !Task.isCancelled else { return }
-                if case .delta(let text) = event, !text.isEmpty {
-                    guard persistedQuestion(
-                        id: question.id,
-                        requestID: result.id,
-                        repoRoot: repoRoot,
-                        store: scopedStore
-                    ) != nil else { return }
-                    answer.message += text
-                    answer.updatedAt = Date()
-                    _ = scopedStore.upsert(answer, repoRoot: repoRoot)
+                // A connection error can occur after an app-owned sidecar has
+                // accepted durable work but before its replacement is ready.
+                // Reacquire the sidecar and poll the same caller-owned ID
+                // before turning a running question into a terminal failure.
+                guard reattachmentAttempts < Self.questionReattachmentRetryLimit,
+                      let app else {
+                    break
+                }
+                reattachmentAttempts += 1
+                do {
+                    let (reattachedClient, reattachedResult) = try await reattachQuestion(
+                        id: activeResult.id,
+                        app: app,
+                        workspace: workspace
+                    )
+                    activeClient = reattachedClient
+                    activeResult = reattachedResult
+                    // A replacement sidecar replays its full event history.
+                    // Keep the current partial answer until the authoritative
+                    // terminal GET replaces it, rather than duplicating deltas.
+                    appendStreamedDeltas = false
+                    continue
+                } catch {
+                    continue
                 }
             }
-            guard !Task.isCancelled else { return }
-            let final = try await client.result(id: result.id)
-            guard let persistedQuestion = persistedQuestion(
-                id: question.id,
-                requestID: result.id,
-                repoRoot: repoRoot,
-                store: scopedStore
-            ) else { return }
-            answer = scopedStore.comments(repoRoot: repoRoot).first(where: { $0.parentId == question.id }) ?? answer
-            let saved = completeQuestion(final, question: persistedQuestion, answer: answer, repoRoot: repoRoot, store: scopedStore)
-            if let panelId {
-                app?.postReviewQuestionNotification(
-                    workspace: workspace,
-                    panelId: panelId,
-                    requestID: result.id,
-                    succeeded: final.status == "completed",
-                    body: saved.message
-                )
-            }
-        } catch {
-            guard !Task.isCancelled else { return }
-            guard let persistedQuestion = persistedQuestion(
-                id: question.id,
-                requestID: result.id,
-                repoRoot: repoRoot,
-                store: scopedStore
-            ) else { return }
-            let saved = markQuestionFailed(persistedQuestion, existingAnswer: answer, repoRoot: repoRoot, store: scopedStore).answer
-            if let panelId {
-                app?.postReviewQuestionNotification(
-                    workspace: workspace,
-                    panelId: panelId,
-                    requestID: result.id,
-                    succeeded: false,
-                    body: saved.message
-                )
-            }
+        }
+        guard !Task.isCancelled,
+              let persistedQuestion = persistedQuestion(
+                  id: question.id,
+                  requestID: activeResult.id,
+                  repoRoot: repoRoot,
+                  store: scopedStore
+              ) else { return }
+        let saved = markQuestionFailed(persistedQuestion, existingAnswer: answer, repoRoot: repoRoot, store: scopedStore).answer
+        if let panelId {
+            app?.postReviewQuestionNotification(
+                workspace: workspace,
+                panelId: panelId,
+                requestID: activeResult.id,
+                succeeded: false,
+                body: saved.message
+            )
         }
     }
 
     private func pendingAnswer(for question: DiffComment, result: ReviewQuestionSidecarResult) -> DiffComment {
         DiffComment(
-            id: UUID(uuidString: result.id) ?? UUID(),
+            // The caller-owned request ID is the parent comment UUID. Provider
+            // answers need a distinct durable comment identity.
+            id: UUID(),
             filePath: question.filePath,
             side: question.side,
             startLine: question.startLine,
@@ -586,6 +628,58 @@ final class DiffCommentsBridge: NSObject, WKScriptMessageHandlerWithReply {
         QuestionTaskKey(workspaceScope: workspace.stableId, commentID: commentID)
     }
 
+    private static let questionReattachmentRetryLimit = 2
+
+    /// Attempts an idempotent POST against a freshly resolved sidecar. Every
+    /// retry carries the persisted request ID, so it either creates the turn
+    /// once or returns the already accepted durable result.
+    private func startQuestion(
+        _ request: ReviewQuestionSidecarRequest,
+        app: AppDelegate,
+        workspace: Workspace
+    ) async throws -> (ReviewQuestionSidecarClient, ReviewQuestionSidecarResult) {
+        var lastError: Error?
+        for _ in 0...Self.questionReattachmentRetryLimit {
+            guard !Task.isCancelled else { throw CancellationError() }
+            guard let client = await app.reviewQuestionSidecarClient(for: workspace) else {
+                continue
+            }
+            do {
+                return (client, try await client.start(request))
+            } catch {
+                lastError = error
+            }
+        }
+        throw lastError ?? ReviewQuestionStartError.sidecarUnavailable
+    }
+
+    /// Reacquires an in-flight request after a transient sidecar connection
+    /// loss. App-owned resolution may launch a replacement sidecar, whose
+    /// durable checkpoint restores the same request ID before it becomes ready.
+    private func reattachQuestion(
+        id: String,
+        app: AppDelegate,
+        workspace: Workspace
+    ) async throws -> (ReviewQuestionSidecarClient, ReviewQuestionSidecarResult) {
+        var lastError: Error?
+        for _ in 0...Self.questionReattachmentRetryLimit {
+            guard !Task.isCancelled else { throw CancellationError() }
+            guard let client = await app.reviewQuestionSidecarClient(for: workspace) else {
+                continue
+            }
+            do {
+                return (client, try await client.result(id: id))
+            } catch {
+                lastError = error
+            }
+        }
+        throw lastError ?? ReviewQuestionStartError.sidecarUnavailable
+    }
+
+    private enum ReviewQuestionStartError: Error {
+        case sidecarUnavailable
+    }
+
     private func finishQuestionTask(for key: QuestionTaskKey, runID: UUID) {
         guard questionTasks[key]?.runID == runID else { return }
         questionTasks[key] = nil
@@ -637,8 +731,7 @@ final class DiffCommentsBridge: NSObject, WKScriptMessageHandlerWithReply {
         let questions = comments.filter { Self.isReviewQuestion($0) && $0.requestStatus == "running" }
         guard !questions.isEmpty else { return }
         let scopedStore = store.workspaceStore(for: workspace.stableId)
-        guard let app = AppDelegate.shared,
-              let client = await app.reviewQuestionSidecarClient(for: workspace) else {
+        guard let app = AppDelegate.shared else {
             for question in questions {
                 _ = markQuestionFailed(question, existingAnswer: comments.first { $0.parentId == question.id }, repoRoot: repoRoot, store: scopedStore)
             }
@@ -653,7 +746,11 @@ final class DiffCommentsBridge: NSObject, WKScriptMessageHandlerWithReply {
                 continue
             }
             do {
-                let result = try await client.result(id: requestID)
+                let (client, result) = try await reattachQuestion(
+                    id: requestID,
+                    app: app,
+                    workspace: workspace
+                )
                 let existingAnswer = comments.first { $0.parentId == question.id }
                     ?? pendingAnswer(for: question, result: result)
                 if result.status != "running" {

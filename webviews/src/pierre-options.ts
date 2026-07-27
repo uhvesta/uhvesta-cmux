@@ -14,6 +14,15 @@ export type DiffViewerOptions = {
   wordWrap: boolean;
 };
 
+/**
+ * Full File expansion is intentionally owned by App's stable per-hunk state.
+ * Pierre's global flag expands every context region and cannot be collapsed
+ * through those stable hunk controls.
+ */
+export function supportsGlobalUnchangedContext(layout: DiffViewerOptions["layout"]): boolean {
+  return layout !== "full";
+}
+
 export function codeViewOptions(
   options: DiffViewerOptions,
   appearance: DiffViewerAppearance,
@@ -23,9 +32,7 @@ export function codeViewOptions(
     diffStyle: options.layout === "split" ? "split" : "unified",
     diffIndicators: options.diffIndicators,
     overflow: options.wordWrap ? "wrap" : "scroll",
-    // Full File drives Pierre's public per-hunk expansion API from App. Do not
-    // set this global flag: it bypasses the individual stable hunk controls.
-    expandUnchanged: options.expandUnchanged,
+    expandUnchanged: supportsGlobalUnchangedContext(options.layout) && options.expandUnchanged,
     disableBackground: !options.showBackgrounds,
     disableLineNumbers: !options.lineNumbers,
     lineHoverHighlight: "number",

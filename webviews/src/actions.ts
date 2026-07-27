@@ -81,20 +81,24 @@ export async function copyReviewPrompt(
   label: DiffViewerLabelResolver,
   fallbackTextarea: HTMLTextAreaElement | null,
 ): Promise<string> {
-  if (navigator.clipboard?.writeText) {
-    try {
-      await navigator.clipboard.writeText(prompt);
-      return label("copiedReviewPrompt");
-    } catch {
-      // A generated viewer can expose Clipboard API yet reject it after focus
-      // changes, so retain the same React-owned fallback as git-apply copy.
+  try {
+    if (navigator.clipboard?.writeText) {
+      try {
+        await navigator.clipboard.writeText(prompt);
+        return label("copiedReviewPrompt");
+      } catch {
+        // A generated viewer can expose Clipboard API yet reject it after focus
+        // changes, so retain the same React-owned fallback as git-apply copy.
+      }
     }
+    if (!fallbackTextarea) throw new Error("Clipboard API unavailable");
+    fallbackTextarea.value = prompt;
+    fallbackTextarea.select();
+    if (!document.execCommand("copy")) throw new Error("Clipboard copy failed");
+    return label("copiedReviewPrompt");
+  } catch {
+    return label("copyFailedReviewPrompt");
   }
-  if (!fallbackTextarea) throw new Error("Clipboard API unavailable");
-  fallbackTextarea.value = prompt;
-  fallbackTextarea.select();
-  if (!document.execCommand("copy")) throw new Error("Clipboard copy failed");
-  return label("copiedReviewPrompt");
 }
 
 function safeGitApplyDelimiter(patch: string): string {

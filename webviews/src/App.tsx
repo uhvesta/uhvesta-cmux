@@ -28,6 +28,7 @@ import { CommentComposer } from "./comments/CommentComposer";
 import { CommentsSidebarSection } from "./comments/CommentsSection";
 import { commentSubmissionText } from "./comments/format";
 import { resolveCommentLabels, type DiffCommentLabels } from "./comments/labels";
+import { runningAskCommentIDs, shouldContinueAskCommentPoll } from "./comments/ask-polling";
 import { SavedComment } from "./comments/SavedComment";
 import type {
   CommentDraft,
@@ -52,6 +53,7 @@ import {
   codeViewOptions,
   fileTreeUnsafeCSS,
   shikiThemeFromGhostty,
+  supportsGlobalUnchangedContext,
   workerHighlighterOptions,
   type DiffViewerOptions,
 } from "./pierre-options";
@@ -619,7 +621,7 @@ export function App({ config, initialStatus }: ConfigProps) {
             const message = await copyReviewPrompt(reviewPrompt(state.comments), label, copyFallbackRef.current);
             dispatch({ type: "set-copy-feedback", message });
           } catch {
-            dispatch({ type: "set-copy-feedback", message: label("copyFailedGitApplyCommand") });
+            dispatch({ type: "set-copy-feedback", message: label("copyFailedReviewPrompt") });
           }
         }}
         onSendReviewPrompt={async () => {
@@ -778,17 +780,6 @@ function useDiffComments({
   const questionPollTimers = useRef(new Map<string, number>());
   const onLoaded = useCallback((comments: DiffCommentRecord[]) => dispatch({ type: "replace-comments", comments }), [dispatch]);
 
-  useEffect(() => {
-    if (!bridgeAvailable || repoRoots.length === 0) return;
-    let cancelled = false;
-    void Promise.all(repoRoots.map(async (repositoryRoot) =>
-      (await bridgeListComments(repositoryRoot)).map((comment) => ({ ...comment, repositoryRoot })),
-    )).then((groups) => {
-      if (!cancelled) onLoaded(groups.flat());
-    }).catch((error) => console.warn("cmux diff comments load failed", error));
-    return () => { cancelled = true; };
-  }, [bridgeAvailable, onLoaded, repoRoots]);
-
   const onGutterUtilityClick = (range: SelectedLineRange, context: { item: DiffItem }) => {
     const side: DiffCommentSide = range.side === "deletions" ? "deletions" : "additions";
     dispatch({
@@ -808,8 +799,9 @@ function useDiffComments({
     questionPollTimers.current.delete(questionID);
   }, []);
 
-  const startQuestionPoll = useCallback((questionID: string) => {
-    const repositoryRoot = latestState.current.comments.find((comment) => comment.id === questionID)?.repositoryRoot;
+  const startQuestionPoll = useCallback((questionID: string, knownRepositoryRoot?: string) => {
+    const repositoryRoot = knownRepositoryRoot ?? latestState.current.comments
+      .find((comment) => comment.id === questionID || comment.parentId === questionID)?.repositoryRoot;
     if (!bridgeAvailable || repositoryRoot == null || questionPollTimers.current.has(questionID)) return;
     const refresh = async () => {
       try {
@@ -817,8 +809,7 @@ function useDiffComments({
         if (!activeRepoRoots.current.includes(repositoryRoot)) return;
         const others = latestState.current.comments.filter((comment) => comment.repositoryRoot !== repositoryRoot);
         dispatch({ type: "replace-comments", comments: [...others, ...fresh.map((comment) => ({ ...comment, repositoryRoot }))] });
-        const answer = fresh.find((comment) => comment.parentId === questionID && comment.readOnly);
-        if (answer?.requestStatus && answer.requestStatus !== "running") stopQuestionPoll(questionID);
+        if (!shouldContinueAskCommentPoll(fresh, questionID)) stopQuestionPoll(questionID);
       } catch {
         // The next interval gets another chance while the native sidecar is live.
       }
@@ -826,6 +817,23 @@ function useDiffComments({
     void refresh();
     questionPollTimers.current.set(questionID, window.setInterval(() => { void refresh(); }, 700));
   }, [activeRepoRoots, bridgeAvailable, dispatch, latestState, stopQuestionPoll]);
+
+  useEffect(() => {
+    if (!bridgeAvailable || repoRoots.length === 0) return;
+    let cancelled = false;
+    void Promise.all(repoRoots.map(async (repositoryRoot) =>
+      (await bridgeListComments(repositoryRoot)).map((comment) => ({ ...comment, repositoryRoot })),
+    )).then((groups) => {
+      if (cancelled) return;
+      const hydrated = groups.flat();
+      onLoaded(hydrated);
+      for (const questionID of runningAskCommentIDs(hydrated)) {
+        const repositoryRoot = hydrated.find((comment) => comment.id === questionID || comment.parentId === questionID)?.repositoryRoot;
+        startQuestionPoll(questionID, repositoryRoot);
+      }
+    }).catch((error) => console.warn("cmux diff comments load failed", error));
+    return () => { cancelled = true; };
+  }, [bridgeAvailable, onLoaded, repoRoots, startQuestionPoll]);
 
   useEffect(() => () => {
     for (const timer of questionPollTimers.current.values()) window.clearInterval(timer);
@@ -868,7 +876,7 @@ function useDiffComments({
           if (!activeRepoRoots.current.includes(repoRoot)) return;
           if (result.question) dispatch({ type: "upsert-comment", comment: { ...result.question, repositoryRoot: repoRoot } });
           if (result.answer) dispatch({ type: "upsert-comment", comment: { ...result.answer, repositoryRoot: repoRoot } });
-          if (result.question && result.status === "running") startQuestionPoll(result.question.id);
+          if (result.question && result.status === "running") startQuestionPoll(result.question.id, repoRoot);
           dispatch({ type: "set-draft", draft: null });
         })
         .catch((error) => console.warn("cmux review question failed", error));
@@ -1538,7 +1546,9 @@ function OptionsMenu({
         <MenuButton icon="external" label={label("openSourceURL")} onClick={() => window.open(externalURL, "_blank", "noreferrer")} />
       ) : null}
       <MenuButton checked={state.filesVisible} icon="files" label={state.filesVisible ? label("hideFiles") : label("showFiles")} onClick={() => dispatch({ type: "set-files-visible", visible: !state.filesVisible })} />
-      <MenuButton checked={state.options.expandUnchanged} icon="document" label={state.options.expandUnchanged ? label("collapseUnchangedContext") : label("expandUnchangedContext")} onClick={() => toggle("expandUnchanged")} />
+      {supportsGlobalUnchangedContext(state.options.layout) ? (
+        <MenuButton checked={state.options.expandUnchanged} icon="document" label={state.options.expandUnchanged ? label("collapseUnchangedContext") : label("expandUnchangedContext")} onClick={() => toggle("expandUnchanged")} />
+      ) : null}
       <MenuButton checked={state.options.showBackgrounds} icon="background" label={state.options.showBackgrounds ? label("hideBackgrounds") : label("showBackgrounds")} onClick={() => toggle("showBackgrounds")} />
       <MenuButton checked={state.options.lineNumbers} icon="numbers" label={state.options.lineNumbers ? label("hideLineNumbers") : label("showLineNumbers")} onClick={() => toggle("lineNumbers")} />
       <MenuButton checked={state.options.wordDiffs} icon="word" label={state.options.wordDiffs ? label("disableWordDiffs") : label("enableWordDiffs")} onClick={() => toggle("wordDiffs")} />

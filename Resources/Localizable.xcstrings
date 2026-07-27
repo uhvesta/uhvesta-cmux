@@ -93655,6 +93655,23 @@
         }
       }
     },
+    "diffViewer.copyFailedReviewPrompt": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Could not copy review prompt."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "レビュー用プロンプトをコピーできませんでした。"
+          }
+        }
+      }
+    },
     "diffViewer.copyFailedGitApplyCommand": {
       "extractionState": "manual",
       "localizations": {

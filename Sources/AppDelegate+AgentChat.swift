@@ -4,6 +4,27 @@ import Foundation
 import os
 import Security
 
+/// Serializes app-owned sidecar replacement so concurrent callers share the
+/// same readiness checkpoint instead of launching competing processes.
+actor AgentChatOwnedServerLaunchCoordinator {
+    private var launchTask: Task<AgentChatServerAvailability, Never>?
+
+    func joinOrStart(
+        _ operation: @escaping @MainActor @Sendable () async -> AgentChatServerAvailability
+    ) async -> AgentChatServerAvailability {
+        if let launchTask {
+            return await launchTask.value
+        }
+        let newLaunchTask = Task { @MainActor in
+            await operation()
+        }
+        launchTask = newLaunchTask
+        let availability = await newLaunchTask.value
+        launchTask = nil
+        return availability
+    }
+}
+
 struct AgentChatActionInFlightGate {
     private struct State {
         var isRunning = false
@@ -12,6 +33,13 @@ struct AgentChatActionInFlightGate {
     }
 
     private nonisolated static let lock = OSAllocatedUnfairLock(initialState: State())
+    private static let ownedServerLaunchCoordinator = AgentChatOwnedServerLaunchCoordinator()
+
+    static func joinOwnedServerLaunch(
+        _ operation: @escaping @MainActor @Sendable () async -> AgentChatServerAvailability
+    ) async -> AgentChatServerAvailability {
+        await ownedServerLaunchCoordinator.joinOrStart(operation)
+    }
 
     static func begin() -> Bool {
         lock.withLock { state in
@@ -299,6 +327,25 @@ extension AppDelegate {
     }
 
     private func ensureOwnedAgentChatServerAvailable(
+        _ agentChat: CmuxAgentChatConfiguration,
+        startCommand: String,
+        globalConfigPath: String?,
+        preferredWindow: NSWindow?
+    ) async -> AgentChatServerAvailability {
+        await AgentChatActionInFlightGate.joinOwnedServerLaunch { [weak self] in
+            guard let self else {
+                return AgentChatServerAvailability(isReachable: false, browserURL: agentChat.url)
+            }
+            return await self.launchOwnedAgentChatServer(
+                agentChat,
+                startCommand: startCommand,
+                globalConfigPath: globalConfigPath,
+                preferredWindow: preferredWindow
+            )
+        }
+    }
+
+    private func launchOwnedAgentChatServer(
         _ agentChat: CmuxAgentChatConfiguration,
         startCommand: String,
         globalConfigPath: String?,

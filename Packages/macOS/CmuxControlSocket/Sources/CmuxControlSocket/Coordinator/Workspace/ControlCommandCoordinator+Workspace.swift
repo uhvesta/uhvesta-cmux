@@ -82,6 +82,7 @@ extension ControlCommandCoordinator {
     ) -> JSONValue {
         var object: [String: JSONValue] = [
             "id": .string(summary.id.uuidString),
+            "stable_id": .string(summary.stableID.uuidString),
             "ref": workspaceRef,
             "title": .string(summary.title),
             "custom_title": orNull(summary.customTitle),

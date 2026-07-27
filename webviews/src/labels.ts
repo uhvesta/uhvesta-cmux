@@ -33,6 +33,7 @@ const DEFAULT_DIFF_VIEWER_LABELS = {
   commentPlaceholder: "Leave a comment",
   comments: "Comments",
   commit: "Commit",
+  copyFailedReviewPrompt: "Could not copy review prompt.",
   copyFailedGitApplyCommand: "Could not copy git apply command.",
   copiedGitApplyCommand: "Copied git apply command",
   copiedReviewPrompt: "Copied review prompt",
@@ -88,6 +89,7 @@ const DEFAULT_DIFF_VIEWER_LABELS = {
 } as const;
 
 const JAPANESE_LOCAL_FALLBACKS: Partial<Record<keyof typeof DEFAULT_DIFF_VIEWER_LABELS, string>> = {
+  copyFailedReviewPrompt: "レビュー用プロンプトをコピーできませんでした。",
   copiedReviewPrompt: "レビュー用プロンプトをコピーしました",
   copyReviewPrompt: "レビュー用プロンプトをコピー",
   answerFrom: "{author} からの回答",
