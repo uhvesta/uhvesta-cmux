@@ -1647,6 +1647,75 @@ final class CMUXOpenCommandTests: XCTestCase {
         try assertFriendlyLastTurnEmptyState(html: wrongSurfaceResult.html)
     }
 
+    func testBranchDiffWorkspaceOverrideSelectsMatchingWorkspaceStableID() throws {
+        let cliPath = try bundledCLIPath()
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cmux-workspace-base-ref-\(UUID().uuidString)", isDirectory: true)
+        let repoURL = rootURL.appendingPathComponent("repo", isDirectory: true)
+        let fileURL = repoURL.appendingPathComponent("story.txt")
+        let runtimeWorkspaceID = UUID().uuidString
+        let stableWorkspaceID = UUID().uuidString
+        let otherRuntimeWorkspaceID = UUID().uuidString
+        let otherStableWorkspaceID = UUID().uuidString
+        let defaultsSuite = "cmux.tests.diff-base-ref.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: defaultsSuite))
+        defer {
+            defaults.removePersistentDomain(forName: defaultsSuite)
+            try? FileManager.default.removeItem(at: rootURL)
+        }
+
+        try FileManager.default.createDirectory(at: repoURL, withIntermediateDirectories: true)
+        try runGit(["init"], in: repoURL)
+        try runGit(["config", "user.name", "cmux tests"], in: repoURL)
+        try runGit(["config", "user.email", "cmux@example.invalid"], in: repoURL)
+        try "base\n".write(to: fileURL, atomically: true, encoding: .utf8)
+        try runGit(["add", "story.txt"], in: repoURL)
+        try runGit(["commit", "-m", "base"], in: repoURL)
+        try runGit(["branch", "workspace-base"], in: repoURL)
+        try "base\nglobal\n".write(to: fileURL, atomically: true, encoding: .utf8)
+        try runGit(["add", "story.txt"], in: repoURL)
+        try runGit(["commit", "-m", "global"], in: repoURL)
+        try runGit(["branch", "global-base"], in: repoURL)
+        try "base\nglobal\nhead\n".write(to: fileURL, atomically: true, encoding: .utf8)
+        try runGit(["add", "story.txt"], in: repoURL)
+        try runGit(["commit", "-m", "head"], in: repoURL)
+
+        defaults.set("global-base", forKey: "diffViewer.branchBaseRef")
+        defaults.set(
+            [stableWorkspaceID: "workspace-base"],
+            forKey: DiffBaseRefSettings.workspaceOverridesKey
+        )
+        defaults.synchronize()
+
+        let result = try runDiffCLIAndReadHTML(
+            cliPath: cliPath,
+            arguments: ["diff", "--branch", "--workspace", runtimeWorkspaceID],
+            environmentOverrides: ["CMUX_BUNDLE_ID": defaultsSuite],
+            currentDirectoryURL: repoURL
+        ) { line in
+            guard let payload = Self.v2Payload(from: line),
+                  let id = payload["id"] as? String,
+                  payload["method"] as? String == "workspace.list" else {
+                return nil
+            }
+            return Self.v2Response(
+                id: id,
+                ok: true,
+                result: [
+                    "workspaces": [
+                        ["id": otherRuntimeWorkspaceID, "stable_id": otherStableWorkspaceID],
+                        ["id": runtimeWorkspaceID, "stable_id": stableWorkspaceID],
+                    ]
+                ]
+            )
+        }
+
+        XCTAssertTrue(result.html.contains("\"branchBaseRef\":\"workspace-base\""), result.html)
+        XCTAssertTrue(result.html.contains("\"sourceLabel\":\"git branch workspace-base\""), result.html)
+        XCTAssertTrue(result.patch.contains("+global"), result.patch)
+        XCTAssertTrue(result.patch.contains("+head"), result.patch)
+    }
+
     /// Asserts the diff viewer HTML renders the friendly, non-error last-turn empty
     /// state: plain-language copy (never the raw baseline CLI error), `statusIsError`
     /// false, and the source switcher still present with last turn selected.
