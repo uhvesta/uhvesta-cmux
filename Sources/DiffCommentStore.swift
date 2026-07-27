@@ -286,13 +286,7 @@ final class DiffCommentStore {
             return
         }
         migrateSchemaIfNeeded()
-        if openingVersion == 4 {
-            _ = execute("""
-                INSERT OR IGNORE INTO legacy_comment_imports(repo_root, id)
-                SELECT repo_root, id FROM comments WHERE scope = 'global';
-                """)
-        }
-        migrateLegacyJSONIfNeeded()
+        migrateLegacyJSONIfNeeded(openingVersion: openingVersion)
         _ = execute("PRAGMA user_version = 5;")
     }
 
@@ -380,9 +374,9 @@ final class DiffCommentStore {
         .reduce(into: Set<String>()) { $0.insert($1) }
     }
 
-    private func migrateLegacyJSONIfNeeded() {
-        guard let database,
-              migrationVersion(database) == 0,
+    private func migrateLegacyJSONIfNeeded(openingVersion: Int32) {
+        guard database != nil,
+              openingVersion == 0 || openingVersion == 4,
               let directoryURL,
               let files = try? FileManager.default.contentsOfDirectory(
                   at: directoryURL,
@@ -396,15 +390,21 @@ final class DiffCommentStore {
                 continue
             }
             for comment in file.comments {
-                var stored = comment
-                if let existingCreatedAt = existingCreatedAt(for: comment.id, scopeKey: Scope.global.key) {
-                    stored.createdAt = existingCreatedAt
+                if openingVersion == 4,
+                   existingCreatedAt(for: comment.id, scopeKey: Scope.global.key) == nil {
+                    continue
                 }
-                save(
-                    stored,
-                    repoRoot: file.repoRoot,
-                    scopeKey: Scope.global.key
-                )
+                var stored = comment
+                if let createdAt = existingCreatedAt(for: comment.id, scopeKey: Scope.global.key) {
+                    stored.createdAt = createdAt
+                }
+                if openingVersion == 0 {
+                    save(
+                        stored,
+                        repoRoot: file.repoRoot,
+                        scopeKey: Scope.global.key
+                    )
+                }
                 _ = execute(
                     "INSERT OR IGNORE INTO legacy_comment_imports(repo_root, id) VALUES (?, ?);",
                     parameters: [
@@ -414,7 +414,9 @@ final class DiffCommentStore {
                 )
             }
         }
-        _ = execute("PRAGMA user_version = 1;")
+        if openingVersion == 0 {
+            _ = execute("PRAGMA user_version = 1;")
+        }
     }
 
     /// Legacy JSON had no workspace identity. The first workspace that opens a
