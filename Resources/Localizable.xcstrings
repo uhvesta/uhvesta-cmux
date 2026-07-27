@@ -53,8 +53,8 @@
     "diffViewer.queuedReviewPrompt": {
       "extractionState": "manual",
       "localizations": {
-        "en": { "stringUnit": { "state": "translated", "value": "Review prompt queued for the next terminal submission" } },
-        "ja": { "stringUnit": { "state": "translated", "value": "次のターミナル送信にレビュー用プロンプトを追加しました" } }
+        "en": { "stringUnit": { "state": "translated", "value": "Review prompt sent to terminal" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "レビュー用プロンプトをターミナルへ送信しました" } }
       }
     },
     "diffViewer.repository": {
@@ -74,8 +74,22 @@
     "diffViewer.sendReviewPromptFailed": {
       "extractionState": "manual",
       "localizations": {
-        "en": { "stringUnit": { "state": "translated", "value": "Could not queue review prompt" } },
-        "ja": { "stringUnit": { "state": "translated", "value": "レビュー用プロンプトを追加できませんでした" } }
+        "en": { "stringUnit": { "state": "translated", "value": "Could not send review prompt to terminal" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "レビュー用プロンプトをターミナルへ送信できませんでした" } }
+      }
+    },
+    "diffComments.bridge.noTerminalForReviewPrompt": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Open a terminal in this workspace before sending the review prompt." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "レビュー用プロンプトを送信する前に、このワークスペースでターミナルを開いてください。" } }
+      }
+    },
+    "diffComments.bridge.sendReviewPromptFailed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Could not send the review prompt to the terminal." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "レビュー用プロンプトをターミナルへ送信できませんでした。" } }
       }
     },
     "diffViewer.switchToFullFile": {

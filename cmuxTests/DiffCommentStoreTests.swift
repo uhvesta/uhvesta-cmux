@@ -457,7 +457,7 @@ final class DiffCommentSubmissionPoolTests: XCTestCase {
             .init(
                 commentId: first,
                 repoRoot: "/tmp/repo-a",
-                submissionText: "## Review feedback\n\n**File:** `a.swift`\n"
+                submissionText: "**File:** `a.swift`\n"
             ),
             workspaceId: workspace
         )
@@ -465,7 +465,7 @@ final class DiffCommentSubmissionPoolTests: XCTestCase {
             .init(
                 commentId: second,
                 repoRoot: "/tmp/repo-b",
-                submissionText: "## Review feedback\n\n**File:** `b.swift`\n"
+                submissionText: "**File:** `b.swift`\n"
             ),
             workspaceId: workspace
         )
@@ -480,6 +480,7 @@ final class DiffCommentSubmissionPoolTests: XCTestCase {
         XCTAssertTrue(bundle.submissionText.contains("## Repository: `/tmp/repo-b`"))
         XCTAssertTrue(bundle.submissionText.contains("### Feedback 1"))
         XCTAssertTrue(bundle.submissionText.contains("### Feedback 2"))
+        XCTAssertEqual(bundle.submissionText.components(separatedBy: "# Review feedback").count - 1, 1)
     }
 }
 

@@ -30,6 +30,15 @@ export function scopedHunkID(itemId: string, hunkId: string): string {
   return `${itemId}\u0000${hunkId}`;
 }
 
+/** Full File is expanded by default; this set records only explicit collapses. */
+export function fullFileHunkIsExpanded(
+  collapsedHunkIDs: ReadonlySet<string>,
+  itemId: string,
+  hunkId: string,
+): boolean {
+  return !collapsedHunkIDs.has(scopedHunkID(itemId, hunkId));
+}
+
 export function annotateDiffMetadata(fileDiff: any, patchText?: string): void {
   if (fileDiff == null || typeof fileDiff !== "object") {
     return;
@@ -84,7 +93,7 @@ export function DiffHeaderMetadata({
   repositoryRoot,
   repositoryStart,
   hunkScope,
-  expandedHunkIDs,
+  collapsedHunkIDs,
   fullFile,
   onExpandHunk,
 }: {
@@ -95,7 +104,7 @@ export function DiffHeaderMetadata({
   repositoryRoot?: string;
   repositoryStart?: boolean;
   hunkScope?: string;
-  expandedHunkIDs?: ReadonlySet<string>;
+  collapsedHunkIDs?: ReadonlySet<string>;
   fullFile?: boolean;
   onExpandHunk?: (hunkIndex: number, hunkId: string) => void;
 }) {
@@ -115,9 +124,9 @@ export function DiffHeaderMetadata({
       {fullFile ? <span data-cmux-full-file-hunks>{(fileDiff?.hunks ?? []).map((hunk: any, index: number) => {
         const hunkId = hunk?.cmuxHunkId;
         if (typeof hunkId !== "string") return null;
-        const expanded = expandedHunkIDs?.has(
-          hunkScope == null ? hunkId : scopedHunkID(hunkScope, hunkId),
-        ) ?? false;
+        const expanded = hunkScope == null
+          ? !(collapsedHunkIDs?.has(hunkId) ?? false)
+          : fullFileHunkIsExpanded(collapsedHunkIDs ?? new Set(), hunkScope, hunkId);
         return (
           <button
             key={hunkId}

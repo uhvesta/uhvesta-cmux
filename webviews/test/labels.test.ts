@@ -34,7 +34,7 @@ describe("createDiffViewerLabelResolver", () => {
   });
 
   test("terminal review action reports an actual send rather than a deferred queue", () => {
-    const label = createDiffViewerLabelResolver();
+    const label = createDiffViewerLabelResolver(undefined);
 
     expect(label("queuedReviewPrompt")).toBe("Review prompt sent to terminal");
     expect(label("sendReviewPromptFailed")).toBe("Could not send review prompt to terminal");
