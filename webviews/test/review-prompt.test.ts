@@ -1,5 +1,11 @@
 import { expect, test } from "bun:test";
-import { isAskComment, isRemoteReviewRoot, reviewPrompt } from "../src/review-prompt";
+import {
+  commentsAfterReviewPromptSent,
+  isAskComment,
+  isRemoteReviewRoot,
+  reviewPrompt,
+  reviewQuestionContext,
+} from "../src/review-prompt";
 import type { DiffCommentRecord } from "../src/comments/types";
 
 function comment(overrides: Partial<DiffCommentRecord> = {}): DiffCommentRecord {
@@ -102,4 +108,28 @@ test("aggregate review prompt keeps repositories with duplicate labels separate"
 test("SSH roots are identified before attempting a local Copilot sidecar", () => {
   expect(isRemoteReviewRoot("ssh://review-host/opt/src/repo")).toBe(true);
   expect(isRemoteReviewRoot("/Users/example/repo")).toBe(false);
+});
+
+test("Copilot question context contains its selected code without sibling feedback", () => {
+  const question = comment({
+    id: "question",
+    repositoryLabel: "repo-a",
+    message: "/ask Why is this interface needed?",
+    submissionText: "**File:** `src/server.ts`\n\n**Selected code**\n\n```text\ninterface Server {}\n```\n",
+  });
+  const context = reviewQuestionContext(question);
+
+  expect(context).toContain("interface Server {}");
+  expect(context).not.toContain("/ask");
+  expect(context).not.toContain("Sibling feedback");
+});
+
+test("successful terminal delivery marks only the sent comments consumed locally", () => {
+  const pending = comment({ id: "pending" });
+  const untouched = comment({ id: "untouched", message: "Keep pending" });
+  const consumedAt = "2026-07-27T12:00:00Z";
+  const comments = commentsAfterReviewPromptSent([pending, untouched], ["pending"], consumedAt);
+
+  expect(comments.find((entry) => entry.id === "pending")?.consumedAt).toBe(consumedAt);
+  expect(comments.find((entry) => entry.id === "untouched")?.consumedAt).toBeUndefined();
 });
