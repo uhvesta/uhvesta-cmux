@@ -35,6 +35,7 @@ describe("createDiffViewerLabelResolver", () => {
 
   test("new review surfaces are part of the required native payload contract", () => {
     const label = createDiffViewerLabelResolver({
+      copyFailedReviewPrompt: "Could not copy review prompt",
       copiedReviewPrompt: "Copied",
       copyReviewPrompt: "Copy",
       answerFrom: "Answer from {author}",
@@ -51,6 +52,7 @@ describe("createDiffViewerLabelResolver", () => {
 
     expect(label("fullFile")).toBe("Full File");
     expect(label("repository")).toBe("Repository");
+    expect(label("copyFailedReviewPrompt")).toBe("Could not copy review prompt");
     expect(label("sendReviewPrompt")).toBe("Send");
     expect(label("answerFrom")).toBe("Answer from {author}");
     expect(label("askUnavailableRemote")).toBe("Unavailable remotely");
