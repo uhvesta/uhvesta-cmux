@@ -532,3 +532,21 @@ final class DiffCommentsBridgeTokenTests: XCTestCase {
         XCTAssertNil(DiffCommentsBridge.diffViewerToken(from: nil))
     }
 }
+
+final class DiffReviewPromptTerminalTargetTests: XCTestCase {
+    func testReviewPanelTargetsTheMostRecentlyUsedTerminalWithoutChangingFocus() {
+        let reviewPanelID = UUID()
+        let rememberedTerminalID = UUID()
+        let fallbackTerminalID = UUID()
+
+        XCTAssertEqual(
+            DiffCommentsBridge.reviewPromptTerminalPanelID(
+                focusedPanelID: reviewPanelID,
+                rememberedTerminalPanelID: rememberedTerminalID,
+                orderedPanelIDs: [reviewPanelID, fallbackTerminalID, rememberedTerminalID],
+                terminalPanelIDs: [rememberedTerminalID, fallbackTerminalID]
+            ),
+            rememberedTerminalID
+        )
+    }
+}

@@ -33,6 +33,13 @@ describe("createDiffViewerLabelResolver", () => {
     expect(label("hideFiles")).toBe("Hide files");
   });
 
+  test("terminal review action reports an actual send rather than a deferred queue", () => {
+    const label = createDiffViewerLabelResolver();
+
+    expect(label("queuedReviewPrompt")).toBe("Review prompt sent to terminal");
+    expect(label("sendReviewPromptFailed")).toBe("Could not send review prompt to terminal");
+  });
+
   test("new review surfaces are part of the required native payload contract", () => {
     const label = createDiffViewerLabelResolver({
       copyFailedReviewPrompt: "Could not copy review prompt",
