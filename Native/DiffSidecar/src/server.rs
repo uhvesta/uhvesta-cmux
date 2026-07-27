@@ -763,6 +763,7 @@ async fn run_git_patch_with_limit(
         "--no-ext-diff".to_owned(),
         "--no-color".to_owned(),
         "--binary".to_owned(),
+        "--unified=2147483647".to_owned(),
     ];
     match source {
         DiffSource::Unstaged { .. } => arguments.push("--".to_owned()),
